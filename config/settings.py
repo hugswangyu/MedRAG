@@ -63,7 +63,7 @@ class Settings:
     # Data paths
     toyhom_dataset_path: Path = _env_path(
         "TOYHOM_DATASET_PATH",
-        "data/toyhom",
+        "Chinese-medical-dialogue-data/Data_数据",
     )
     user_upload_case_path: Path = _env_path(
         "USER_UPLOAD_CASE_PATH",
