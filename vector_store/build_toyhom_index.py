@@ -45,7 +45,7 @@ def build_toyhom_index(
     skipped = 0
     total = len(docs)
     for batch_docs in _batched(docs, batch_size):
-        texts = [doc["text"] for doc in batch_docs]
+        texts = [doc["title"] for doc in batch_docs]
         embeddings = embedding_model.encode(texts, batch_size=batch_size, is_query=False)
         ok = milvus.insert_batch(batch_docs, embeddings)
         if ok:
