@@ -63,6 +63,18 @@ def _clean_text(value: object) -> str:
     return WHITESPACE_RE.sub(" ", text).strip()
 
 
+def _department_from_path(data_root: Path, csv_path: Path) -> str:
+    try:
+        relative_parts = csv_path.relative_to(data_root).parts
+    except (IndexError, ValueError):
+        return ""
+
+    folder_name = relative_parts[0] if len(relative_parts) > 1 else data_root.name
+    if "_" in folder_name:
+        folder_name = folder_name.rsplit("_", 1)[-1]
+    return _clean_text(folder_name)
+
+
 def _build_text(record: Dict[str, str]) -> str:
     return "\n".join(
         [
@@ -151,20 +163,22 @@ def load_toyhom_dataset(data_root, limit=None) -> List[Dict]:
     max_count = None if limit is None else int(limit)
 
     for csv_path in sorted(root.rglob("*.csv")):
+        path_department = _department_from_path(root, csv_path)
         for row in _iter_csv_rows(csv_path):
+            department = path_department or row["department"]
             question = row["question"]
             answer = row["answer"]
             if len(question) < 2 or len(answer) < 5:
                 continue
 
-            dedupe_key = (row["department"], row["title"], question, answer)
+            dedupe_key = (department, row["title"], question, answer)
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
 
             record = {
                 "id": f"toyhom-{len(records) + 1}",
-                "department": row["department"],
+                "department": department,
                 "title": row["title"],
                 "question": question,
                 "answer": answer,
