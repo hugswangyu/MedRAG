@@ -22,10 +22,12 @@ def _batched(items: List[dict], batch_size: int) -> Iterable[List[dict]]:
 
 def build_toyhom_index(
     data_root: str | Path = settings.toyhom_dataset_path,
-    batch_size: int = 32,
-    limit: int | None = None,
+    batch_size: int = 128,
+    limit: int | None = 10000,
     recreate: bool = False,
 ) -> None:
+    if limit == 0:
+        limit = None
     docs = load_toyhom_dataset(data_root, limit=limit)
     print(f"Loaded Toyhom docs: {len(docs)}")
     if not docs:
@@ -59,8 +61,8 @@ def build_toyhom_index(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build Toyhom medical QA vectors in Milvus.")
     parser.add_argument("--data_root", default=str(settings.toyhom_dataset_path), help="Toyhom dataset root.")
-    parser.add_argument("--batch_size", type=int, default=32, help="Embedding and insert batch size.")
-    parser.add_argument("--limit", type=int, default=None, help="Maximum documents to index.")
+    parser.add_argument("--batch_size", type=int, default=128, help="Embedding and insert batch size.")
+    parser.add_argument("--limit", type=int, default=10000, help="Maximum documents to index. Pass 0 for unlimited.")
     parser.add_argument("--recreate", action="store_true", help="Drop and recreate the collection.")
     return parser.parse_args()
 

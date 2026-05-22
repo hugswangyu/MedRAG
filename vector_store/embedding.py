@@ -16,7 +16,14 @@ BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 class EmbeddingModel:
     def __init__(self, model_name: str = settings.embedding_model_name):
         self.model_name = model_name
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
         self.model = SentenceTransformer(model_name, device=self.device)
         self.embedding_dim = self.model.get_sentence_embedding_dimension()
         print(

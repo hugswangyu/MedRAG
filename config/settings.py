@@ -57,7 +57,7 @@ class Settings:
     # Embedding
     embedding_model_name: str = _env_str(
         "EMBEDDING_MODEL_NAME",
-        "BAAI/bge-base-zh-v1.5",
+        "BAAI/bge-small-zh-v1.5",
     )
 
     # Data paths
