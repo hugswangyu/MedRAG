@@ -1,9 +1,8 @@
 """Hybrid multi-source retriever.
 
-Orchestrates three retrieval backends via a QueryRouter:
+Orchestrates two retrieval backends via a QueryRouter:
   1. KGRetriever      — Neo4j medical knowledge graph
   2. ToyhomQARetriever — Milvus-backed medical QA
-  3. user_case_summary — optional user-uploaded case (injected as context)
 
 Each source is called independently; one failure does not affect the others.
 """
@@ -11,7 +10,7 @@ Each source is called independently; one failure does not affect the others.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -38,26 +37,21 @@ class HybridRetriever:
     def retrieve(
         self,
         query: str,
-        user_case_summary: Optional[str] = None,
         top_k: int = 5,
     ) -> Dict:
         """Route *query* and fetch results from the appropriate sources.
 
         Args:
             query: Natural-language medical question.
-            user_case_summary: Pre-computed case summary (None if not available).
             top_k: Max results from the vector store.
 
         Returns:
-            Dict with keys: route, kg_results, toyhom_results,
-            case_context, all_results.
+            Dict with keys: route, kg_results, toyhom_results, all_results.
         """
-        has_case = bool(user_case_summary)
-        route = self.router.route(query, has_case=has_case)
+        route = self.router.route(query)
 
         kg_results: List[Dict] = []
         toyhom_results: List[Dict] = []
-        case_context: str = ""
 
         # --- KG ---
         if route["use_kg"]:
@@ -67,10 +61,6 @@ class HybridRetriever:
         if route["use_toyhom_qa"]:
             toyhom_results = self._safe_toyhom_search(query, top_k)
 
-        # --- User case ---
-        if route["use_user_case"] and user_case_summary:
-            case_context = user_case_summary
-
         # Merge
         all_results: List[Dict] = kg_results + toyhom_results
 
@@ -78,7 +68,6 @@ class HybridRetriever:
             "route": route,
             "kg_results": kg_results,
             "toyhom_results": toyhom_results,
-            "case_context": case_context,
             "all_results": all_results,
         }
 

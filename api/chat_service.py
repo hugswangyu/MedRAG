@@ -108,7 +108,7 @@ class MedicalChatService:
         risk_info = self.safety_guard.detect_risk(query)
 
         # 2. Multi-source retrieval
-        retrieval = self.hybrid_retriever.retrieve(query, user_case_summary)
+        retrieval = self.hybrid_retriever.retrieve(query)
 
         # 3. Rerank
         reranked = self.reranker.rerank(
@@ -117,12 +117,13 @@ class MedicalChatService:
             top_k=settings.rerank_top_k,
         )
 
-        # 4. Build prompt
+        # 4. Build prompt (case context is injected directly — always
+        #    included when available, bypassing the Router's decision)
         prompt = self.prompt_builder.build_answer_prompt(
             query=query,
             kg_results=retrieval["kg_results"],
             toyhom_results=retrieval["toyhom_results"],
-            case_context=retrieval.get("case_context"),
+            case_context=user_case_summary,
             route=retrieval["route"],
         )
 
