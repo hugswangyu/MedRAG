@@ -1,25 +1,18 @@
 """Rerankers for multi-source retrieval results.
 
-Three strategies, all sharing the same ``rerank(query, results, top_k)``
-interface so they are drop-in interchangeable:
+Two strategies, sharing the same ``rerank(query, results, top_k)``
+interface:
 
-  - SimpleReranker      rule-based (zero added latency)
-  - CrossEncoderReranker  neural cross-encoder model
-  - LLMReranker         DeepSeek/OpenAI pointwise scoring
+  - CrossEncoderReranker  neural cross-encoder (production default)
+  - SimpleReranker        rule-based (zero-latency fallback)
+
+Use ``get_reranker()`` to auto-select the best available one.
 """
 
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
-from typing import Dict, List, Optional
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from config.settings import settings
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -131,115 +124,20 @@ class CrossEncoderReranker:
 
 
 # ---------------------------------------------------------------------------
-# 3. LLMReranker  (pointwise LLM scoring)
-# ---------------------------------------------------------------------------
-
-_RANKER_SYSTEM = """你是一个医疗检索结果的相关性评估专家。
-
-你的任务：对给定的用户问题和每个检索结果，评估其相关性。
-
-评分标准（0-1 浮点数）：
-- 1.0: 非常相关，直接回答了用户的问题
-- 0.7-0.9: 比较相关，提供了有用的参考信息
-- 0.4-0.6: 部分相关，但不够直接或不够完整
-- 0.1-0.3: 弱相关，仅有微量关联
-- 0.0: 完全不相关
-
-请只输出一个 JSON 数组，包含每个结果的相关性分数，格式： [0.9, 0.3, 0.7, ...]
-不要输出任何其他文字。"""
-
-
-class LLMReranker:
-    """Pointwise LLM relevance scoring.
-
-    Sends (query, result_text) pairs to an OpenAI-compatible LLM for
-    relevance scoring.  Higher accuracy at the cost of latency + token $$.
-    """
-
-    def __init__(self, llm_client):
-        self.llm = llm_client
-
-    def rerank(self, query: str, results: List[Dict],
-               top_k: int = 8) -> List[Dict]:
-        if not results:
-            return []
-
-        llm_scores = self._score_batch(query, results)
-        if llm_scores is None or len(llm_scores) != len(results):
-            logger.warning("LLM scoring failed, falling back to source-prior-only")
-            llm_scores = [0.5] * len(results)
-
-        for r, llm_s in zip(results, llm_scores):
-            src_bonus = SOURCE_BONUS.get(r.get("source", ""), 0.0)
-            r["final_score"] = round(float(llm_s) + src_bonus, 4)
-            r["rerank_reason"] = (
-                f"source={r.get('source')}, llm={llm_s:.3f}"
-                + (f" +src_bonus={src_bonus:.2f}" if src_bonus else "")
-            )
-
-        return sorted(results, key=lambda r: r["final_score"], reverse=True)[:top_k]
-
-    def _score_batch(self, query: str,
-                     results: List[Dict]) -> Optional[List[float]]:
-        items = []
-        for i, r in enumerate(results):
-            text = _result_text(r)
-            items.append(f"[{i}] {text[:300]}")
-
-        user_msg = (
-            f"用户问题：{query}\n\n"
-            + "待评估的检索结果：\n" + "\n\n".join(items)
-            + "\n\n请输出每个结果的相关性分数（JSON 数组）："
-        )
-
-        try:
-            resp = self.llm.chat.completions.create(
-                model=settings.deepseek_default_model,
-                messages=[
-                    {"role": "system", "content": _RANKER_SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ],
-                temperature=0.0,
-                max_tokens=256,
-            )
-            raw = resp.choices[0].message.content
-            return self._parse_scores(raw)
-        except Exception:
-            logger.debug("LLM rerank call failed", exc_info=True)
-            return None
-
-    @staticmethod
-    def _parse_scores(raw: str) -> Optional[List[float]]:
-        import json, re
-        raw = raw.strip()
-        m = re.search(r"\[[0-9.,\s]+\]", raw)
-        if m:
-            try:
-                return [float(x) for x in json.loads(m.group(0))]
-            except (json.JSONDecodeError, ValueError):
-                pass
-        return None
-
-
-# ---------------------------------------------------------------------------
 # Factory: best-available reranker with fallback chain
 # ---------------------------------------------------------------------------
 
 _DEFAULT_CROSS_MODEL = "BAAI/bge-reranker-base"
 
 
-def get_reranker(llm_client=None,
-                 cross_model: str = _DEFAULT_CROSS_MODEL):
+def get_reranker(cross_model: str = _DEFAULT_CROSS_MODEL):
     """Return the best available reranker.
 
     Priority: CrossEncoder → SimpleReranker (zero-dep fallback).
 
-    Pass ``llm_client`` if you also want LLMReranker as an option
-    (selectable via ``.llm`` after construction).
-
     Usage::
 
-        reranker = get_reranker(llm_client=my_llm)
+        reranker = get_reranker()
         ranked = reranker.rerank(query, results, top_k=8)
     """
     try:
