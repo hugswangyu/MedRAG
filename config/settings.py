@@ -84,6 +84,7 @@ class Settings:
 
     # LLM / DeepSeek
     llm_type: str = _env_str("LLM_TYPE", "deepseek")
+    llm_provider: str = _env_str("LLM_PROVIDER", "deepseek")  # deepseek | zhipuai | ollama
     deepseek_api_key: str = _env_str("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = _env_str("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     deepseek_default_model: str = _env_str("DEEPSEEK_DEFAULT_MODEL", "deepseek-chat")
@@ -98,6 +99,14 @@ class Settings:
     )
     deepseek_intent_model: str = _env_str("DEEPSEEK_INTENT_MODEL", deepseek_default_model)
     deepseek_answer_model: str = _env_str("DEEPSEEK_ANSWER_MODEL", deepseek_default_model)
+
+    # ZhipuAI (智谱)
+    zhipuai_api_key: str = _env_str("ZHIPUAI_API_KEY", "")
+    zhipuai_model: str = _env_str("ZHIPUAI_MODEL", "glm-4-plus")
+
+    # Ollama
+    ollama_base_url: str = _env_str("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    ollama_model: str = _env_str("OLLAMA_MODEL", "qwen:32b")
 
 
 settings = Settings()
@@ -120,9 +129,14 @@ USER_UPLOAD_CASE_PATH = settings.user_upload_case_path
 RETRIEVAL_TOP_K = settings.retrieval_top_k
 RERANK_TOP_K = settings.rerank_top_k
 LLM_TYPE = settings.llm_type
+LLM_PROVIDER = settings.llm_provider
 DEEPSEEK_API_KEY = settings.deepseek_api_key
 DEEPSEEK_BASE_URL = settings.deepseek_base_url
 DEEPSEEK_DEFAULT_MODEL = settings.deepseek_default_model
 DEEPSEEK_MODEL_OPTIONS = settings.deepseek_model_options
 DEEPSEEK_INTENT_MODEL = settings.deepseek_intent_model
 DEEPSEEK_ANSWER_MODEL = settings.deepseek_answer_model
+ZHIPUAI_API_KEY = settings.zhipuai_api_key
+ZHIPUAI_MODEL = settings.zhipuai_model
+OLLAMA_BASE_URL = settings.ollama_base_url
+OLLAMA_MODEL = settings.ollama_model
