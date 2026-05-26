@@ -219,3 +219,37 @@ class LLMReranker:
             except (json.JSONDecodeError, ValueError):
                 pass
         return None
+
+
+# ---------------------------------------------------------------------------
+# Factory: best-available reranker with fallback chain
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CROSS_MODEL = "BAAI/bge-reranker-base"
+
+
+def get_reranker(llm_client=None,
+                 cross_model: str = _DEFAULT_CROSS_MODEL):
+    """Return the best available reranker.
+
+    Priority: CrossEncoder → SimpleReranker (zero-dep fallback).
+
+    Pass ``llm_client`` if you also want LLMReranker as an option
+    (selectable via ``.llm`` after construction).
+
+    Usage::
+
+        reranker = get_reranker(llm_client=my_llm)
+        ranked = reranker.rerank(query, results, top_k=8)
+    """
+    try:
+        cross = CrossEncoderReranker(model_name=cross_model)
+        _ = cross.model  # trigger download / validation
+        logger.info("Using CrossEncoderReranker (model=%s)", cross_model)
+        return cross
+    except Exception:
+        logger.warning(
+            "CrossEncoder unavailable, falling back to SimpleReranker",
+            exc_info=True,
+        )
+        return SimpleReranker()
