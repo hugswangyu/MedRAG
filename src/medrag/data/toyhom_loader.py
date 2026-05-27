@@ -5,9 +5,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 ENCODINGS = ("utf-8-sig", "utf-8", "gb18030")
@@ -148,14 +151,14 @@ def _iter_csv_rows(csv_path: Path) -> Iterable[Dict[str, str]]:
         except Exception as exc:
             last_error = exc
 
-    print(f"warning: skip bad csv file {csv_path}: {last_error}")
+    logger.warning(f"Skip bad csv file {csv_path}: {last_error}")
 
 
 def load_toyhom_dataset(data_root, limit=None) -> List[Dict]:
     """Load Toyhom CSV files recursively into a unified list of dictionaries."""
     root = Path(data_root).expanduser()
     if not root.exists():
-        print(f"warning: Toyhom data root does not exist: {root}")
+        logger.warning(f"Toyhom data root does not exist: {root}")
         return []
 
     records: List[Dict] = []

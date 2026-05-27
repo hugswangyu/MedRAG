@@ -1,4 +1,4 @@
-"""LLM-based medical case summarisation.
+"""LLM-based medical case summarisation and case-file processing pipeline.
 
 Generates a structured summary from de-identified case text using any
 OpenAI-compatible LLM client (DeepSeek, OpenAI, etc.).
@@ -6,7 +6,10 @@ OpenAI-compatible LLM client (DeepSeek, OpenAI, etc.).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from medrag.config.settings import settings
+from medrag.llm import get_llm_client
 
 _SUMMARY_SYSTEM = """你是一位经验丰富的医疗记录整理专家。你的任务是根据用户提供的病例文本，提取关键信息并整理成结构化摘要。
 
@@ -57,3 +60,30 @@ def summarize_case(case_text: str, llm_client) -> str:
         max_tokens=1024,
     )
     return response.choices[0].message.content
+
+
+def process_case_file(uploaded_file, usname: str, llm_client=None) -> str:
+    """End-to-end case file pipeline: save → parse → clean → desensitize → summarize.
+
+    *uploaded_file* is a Streamlit ``UploadedFile`` or any object with
+    ``.name`` and ``.getbuffer()``.
+
+    Returns the structured case summary string.
+    """
+    from medrag.data.case_parser import parse_case_file as _parse
+    from medrag.data.text_cleaner import clean_medical_text, desensitize_medical_text
+
+    if llm_client is None:
+        llm_client = get_llm_client("deepseek")
+
+    user_dir = Path("user_uploads") / usname
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = user_dir / uploaded_file.name
+    with open(dest, "wb") as fh:
+        fh.write(uploaded_file.getbuffer())
+
+    raw = _parse(str(dest))
+    cleaned = clean_medical_text(raw)
+    safe = desensitize_medical_text(cleaned)
+    return summarize_case(safe, llm_client)

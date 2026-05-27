@@ -1,12 +1,7 @@
 import os
-from pathlib import Path
 import streamlit as st
 
-from medrag.config.settings import settings
-from medrag.llm import get_llm_client
-
-# LLM client (used for case summarisation)
-deepseek_client = get_llm_client("deepseek")
+from medrag.data import process_case_file
 
 
 # ---------------------------------------------------------------------------
@@ -25,26 +20,31 @@ def _init_chat_service():
 
 
 # ---------------------------------------------------------------------------
-# Case-file processing
+# Shared rendering helpers
 # ---------------------------------------------------------------------------
 
-def process_case_file(uploaded_file, usname: str) -> str:
-    """Save → parse → clean & desensitize → summarise → return summary."""
-    from medrag.data.case_parser import parse_case_file
-    from medrag.data.text_cleaner import clean_medical_text, desensitize_medical_text
-    from medrag.data.case_summary import summarize_case
 
-    user_dir = Path("user_uploads") / usname
-    user_dir.mkdir(parents=True, exist_ok=True)
+def _render_kg_results(results: list) -> None:
+    """Render knowledge graph result expander."""
+    with st.expander("知识图谱结果"):
+        for r in results[:5]:
+            name = r.get("name") or r.get("名称", "")
+            desc = r.get("desc") or r.get("疾病简介", "")
+            st.markdown(f"**{name}**")
+            if desc:
+                st.caption(str(desc)[:300])
+            st.divider()
 
-    dest = user_dir / uploaded_file.name
-    with open(dest, "wb") as fh:
-        fh.write(uploaded_file.getbuffer())
 
-    raw = parse_case_file(str(dest))
-    cleaned = clean_medical_text(raw)
-    safe = desensitize_medical_text(cleaned)
-    return summarize_case(safe, deepseek_client)
+def _render_toyhom_results(results: list) -> None:
+    """Render similar QA result expander."""
+    with st.expander("相似问答结果"):
+        for r in results[:5]:
+            st.markdown(f"**Q:** {r.get('question', '')}")
+            ans = r.get("answer", "")
+            if ans:
+                st.caption(str(ans)[:300])
+            st.divider()
 
 
 # ---------------------------------------------------------------------------
@@ -141,22 +141,9 @@ def main(is_admin: bool, usname: str):
                     with st.expander("检索路由信息"):
                         st.json(msg["route"])
                 if show_kg and msg.get("kg_results"):
-                    with st.expander("知识图谱结果"):
-                        for r in msg["kg_results"][:5]:
-                            name = r.get("name") or r.get("名称", "")
-                            desc = r.get("desc") or r.get("疾病简介", "")
-                            st.markdown(f"**{name}**")
-                            if desc:
-                                st.caption(str(desc)[:300])
-                            st.divider()
+                    _render_kg_results(msg["kg_results"])
                 if show_toyhom and msg.get("toyhom_results"):
-                    with st.expander("相似问答结果"):
-                        for r in msg["toyhom_results"][:5]:
-                            st.markdown(f"**Q:** {r.get('question', '')}")
-                            ans = r.get("answer", "")
-                            if ans:
-                                st.caption(str(ans)[:300])
-                            st.divider()
+                    _render_toyhom_results(msg["toyhom_results"])
 
     # -- Chat input ----------------------------------------------------------
     if query := st.chat_input("请输入您的医疗问题…", key=f"chat_input_{active_idx}"):
@@ -188,22 +175,9 @@ def main(is_admin: bool, usname: str):
                 with st.expander("检索路由信息"):
                     st.json(result["route"])
             if result.get("kg_results"):
-                with st.expander("知识图谱结果"):
-                    for r in result["kg_results"][:5]:
-                        name = r.get("name") or r.get("名称", "")
-                        desc = r.get("desc") or r.get("疾病简介", "")
-                        st.markdown(f"**{name}**")
-                        if desc:
-                            st.caption(str(desc)[:300])
-                        st.divider()
+                _render_kg_results(result["kg_results"])
             if result.get("toyhom_results"):
-                with st.expander("相似问答结果"):
-                    for r in result["toyhom_results"][:5]:
-                        st.markdown(f"**Q:** {r.get('question', '')}")
-                        ans = r.get("answer", "")
-                        if ans:
-                            st.caption(str(ans)[:300])
-                        st.divider()
+                _render_toyhom_results(result["toyhom_results"])
 
             current_messages.append(
                 {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List
 
 from pymilvus import (
@@ -14,6 +15,8 @@ from pymilvus import (
 )
 from pymilvus.exceptions import MilvusException
 
+
+logger = logging.getLogger(__name__)
 from medrag.config.settings import settings
 
 
@@ -53,19 +56,19 @@ class MilvusClientWrapper:
                 uri=self.uri,
                 token=self.token,
             )
-            print(f"Milvus connected: {self.uri}")
+            logger.info(f"Milvus connected: {self.uri}")
         else:
             connections.connect(alias=self.alias, host=self.host, port=self.port)
-            print(f"Milvus connected: {self.host}:{self.port}")
+            logger.info(f"Milvus connected: {self.host}:{self.port}")
 
     def create_collection(self, embedding_dim: int, recreate: bool = False) -> Collection:
         if recreate and utility.has_collection(self.collection_name, using=self.alias):
             utility.drop_collection(self.collection_name, using=self.alias)
-            print(f"Dropped Milvus collection: {self.collection_name}")
+            logger.info(f"Dropped Milvus collection: {self.collection_name}")
 
         if utility.has_collection(self.collection_name, using=self.alias):
             self.collection = Collection(self.collection_name, using=self.alias)
-            print(f"Using existing Milvus collection: {self.collection_name}")
+            logger.info(f"Using existing Milvus collection: {self.collection_name}")
             return self.collection
 
         fields = [
@@ -91,7 +94,7 @@ class MilvusClientWrapper:
             shards_num=2,
         )
 
-        print(f"Created Milvus collection: {self.collection_name}, dim={embedding_dim}")
+        logger.info(f"Created Milvus collection: {self.collection_name}, dim={embedding_dim}")
         return self.collection
 
     def insert_batch(self, docs: List[Dict], embeddings: List[List[float]]) -> bool:
@@ -129,15 +132,15 @@ class MilvusClientWrapper:
             if hasattr(self.collection, "upsert"):
                 try:
                     self.collection.upsert(rows)
-                    print(f"warning: duplicate primary keys were upserted")
+                    logger.warning(f"Duplicate primary keys were upserted")
                     return True
                 except MilvusException as upsert_exc:
                     if "exceeds max length" in str(upsert_exc).lower() or "length of varchar" in str(upsert_exc).lower():
                         return self._insert_one_by_one(rows)
-                    print(f"warning: skip batch after Milvus upsert failed: {upsert_exc}")
+                    logger.warning(f"Skip batch after Milvus upsert failed: {upsert_exc}")
                     return False
 
-            print(f"warning: skip batch after Milvus insert failed: {exc}")
+            logger.warning(f"Skip batch after Milvus insert failed: {exc}")
             return False
 
     def _insert_one_by_one(self, rows: List[Dict]) -> bool:
@@ -158,7 +161,7 @@ class MilvusClientWrapper:
         if self.collection is None:
             self.collection = Collection(self.collection_name, using=self.alias)
         self.collection.flush()
-        print(f"Milvus collection flushed: {self.collection_name}")
+        logger.info(f"Milvus collection flushed: {self.collection_name}")
 
     def create_index(self) -> None:
         if self.collection is None:
@@ -171,13 +174,13 @@ class MilvusClientWrapper:
                 "params": {"nlist": 2048},
             },
         )
-        print(f"IVF_FLAT index created on: {self.collection_name}")
+        logger.info(f"IVF_FLAT index created on: {self.collection_name}")
 
     def load_collection(self) -> Collection:
         if self.collection is None:
             self.collection = Collection(self.collection_name, using=self.alias)
         self.collection.load()
-        print(f"Milvus collection loaded: {self.collection_name}")
+        logger.info(f"Milvus collection loaded: {self.collection_name}")
         return self.collection
 
     @staticmethod

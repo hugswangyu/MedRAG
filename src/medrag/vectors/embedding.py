@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import List
 
 import torch
 from sentence_transformers import SentenceTransformer
 
 from medrag.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
@@ -26,7 +29,7 @@ class EmbeddingModel:
 
         self.model = SentenceTransformer(model_name, device=self.device)
         self.embedding_dim = self.model.get_sentence_embedding_dimension()
-        print(
+        logger.info(
             f"Embedding model loaded: {self.model_name}, "
             f"device={self.device}, dim={self.embedding_dim}"
         )
