@@ -231,7 +231,7 @@ class Bert_Model(nn.Module):
 我们将意图识别、知识库查询、对话界面都写在了```webui.py```中。2024.5.21，我们为界面增加了登陆、注册界面，设置了用户和管理员两种身份，您可以使用命令启动：
 
 ```
-streamlit run login.py
+streamlit run src/medrag/app/main.py
 ```
 
 登陆界面如下图所示：
