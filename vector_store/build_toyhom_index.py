@@ -3,13 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 from typing import Iterable, List
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import settings
 from data_processor.toyhom_loader import load_toyhom_dataset

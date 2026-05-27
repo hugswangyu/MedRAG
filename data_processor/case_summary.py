@@ -6,13 +6,6 @@ OpenAI-compatible LLM client (DeepSeek, OpenAI, etc.).
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from config.settings import settings
 
 _SUMMARY_SYSTEM = """你是一位经验丰富的医疗记录整理专家。你的任务是根据用户提供的病例文本，提取关键信息并整理成结构化摘要。

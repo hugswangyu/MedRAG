@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -31,10 +30,6 @@ from typing import Callable, Dict, List, Set, Tuple
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from data_processor.toyhom_loader import load_toyhom_dataset
 

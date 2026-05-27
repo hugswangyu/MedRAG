@@ -12,13 +12,7 @@ and Cypher patterns mirror ``webui.generate_prompt``.
 from __future__ import annotations
 
 import random
-import sys
-from pathlib import Path
 from typing import Dict, List, Optional
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 import py2neo
 
