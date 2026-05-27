@@ -104,33 +104,3 @@ class Settings:
 
 
 settings = Settings()
-
-
-# Backward-friendly constant aliases for modules that prefer direct imports.
-NEO4J_URI = settings.neo4j_uri
-NEO4J_USER = settings.neo4j_user
-NEO4J_PASSWORD = settings.neo4j_password
-NEO4J_DATABASE = settings.neo4j_database
-
-MILVUS_HOST = settings.milvus_host
-MILVUS_PORT = settings.milvus_port
-MILVUS_COLLECTION = settings.milvus_collection
-
-EMBEDDING_MODEL_NAME = settings.embedding_model_name
-TOYHOM_DATASET_PATH = settings.toyhom_dataset_path
-USER_UPLOAD_CASE_PATH = settings.user_upload_case_path
-
-RETRIEVAL_TOP_K = settings.retrieval_top_k
-RERANK_TOP_K = settings.rerank_top_k
-LLM_TYPE = settings.llm_type
-LLM_PROVIDER = settings.llm_provider
-DEEPSEEK_API_KEY = settings.deepseek_api_key
-DEEPSEEK_BASE_URL = settings.deepseek_base_url
-DEEPSEEK_DEFAULT_MODEL = settings.deepseek_default_model
-DEEPSEEK_MODEL_OPTIONS = settings.deepseek_model_options
-DEEPSEEK_INTENT_MODEL = settings.deepseek_intent_model
-DEEPSEEK_ANSWER_MODEL = settings.deepseek_answer_model
-ZHIPUAI_API_KEY = settings.zhipuai_api_key
-ZHIPUAI_MODEL = settings.zhipuai_model
-OLLAMA_BASE_URL = settings.ollama_base_url
-OLLAMA_MODEL = settings.ollama_model

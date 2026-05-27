@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from medrag.config.prompt_templates import (
+from medrag.prompts import (
     MEDICAL_ANSWER_PROMPT,
     CONTEXT_CASE_HEADER,
     CONTEXT_KG_HEADER,
