@@ -20,6 +20,7 @@ from medrag.auth.credentials import (
     load_credentials,
     save_credentials,
 )
+from medrag.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "medrag-dev-secret-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 天
 
-_STORAGE_FILE = os.path.join("tmp_data", "user_credentials.json")
+_STORAGE_FILE = str(settings.credentials_path)
 
 
 @dataclass

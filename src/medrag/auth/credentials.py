@@ -1,14 +1,12 @@
-"""用户凭据模型与 JSON 文件持久化。
-
-替代分散在 ``user_data_storage.py`` 中的认证逻辑和 ``webui.py`` 中硬编码的管理员检查。
-"""
+"""用户凭据模型与 JSON 文件持久化。"""
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass
 from typing import Dict
+
+from medrag.config.settings import settings
+from medrag.infrastructure.storage import JsonStore
 
 
 @dataclass
@@ -37,40 +35,29 @@ class Credentials:
 # 持久化
 # ---------------------------------------------------------------------------
 
-DEFAULT_STORAGE_FILE = os.path.join("tmp_data", "user_credentials.json")
+_default_store = JsonStore(str(settings.credentials_path))
 
 
-def _ensure_storage_dir(file_path: str) -> None:
-    folder = os.path.dirname(file_path)
-    if folder and not os.path.exists(folder):
-        os.makedirs(folder)
-
-
-def load_credentials(file_path: str = DEFAULT_STORAGE_FILE) -> Dict[str, Credentials]:
-    """从 *file_path* 读取凭据，失败时返回空字典。"""
-    try:
-        with open(file_path, "r") as f:
-            data = json.load(f)
-        return {k: Credentials.from_dict(v) for k, v in data.items()}
-    except (FileNotFoundError, json.JSONDecodeError):
+def load_credentials(file_path: str | None = None) -> Dict[str, Credentials]:
+    store = JsonStore(file_path) if file_path else _default_store
+    data = store.read()
+    if isinstance(data, list):
         return {}
+    return {k: Credentials.from_dict(v) for k, v in data.items()}
 
 
 def save_credentials(
     credentials: Dict[str, Credentials],
-    file_path: str = DEFAULT_STORAGE_FILE,
+    file_path: str | None = None,
 ) -> None:
-    """将 *credentials* 字典写入 *file_path*。"""
-    _ensure_storage_dir(file_path)
+    store = JsonStore(file_path) if file_path else _default_store
     data = {k: v.to_dict() for k, v in credentials.items()}
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    store.write(data)
 
 
 def get_or_create_credentials(
-    file_path: str = DEFAULT_STORAGE_FILE,
+    file_path: str | None = None,
 ) -> Dict[str, Credentials]:
-    """加载凭据，若文件为空则初始化默认管理员账号。"""
     creds = load_credentials(file_path)
     if not creds:
         admin = Credentials(username="admin", password="admin123", is_admin=True)

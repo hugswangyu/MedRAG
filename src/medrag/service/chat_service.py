@@ -6,11 +6,7 @@
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
 from typing import Dict, Generator, Optional
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 from medrag.config.settings import settings
 from medrag.rag import PromptBuilder, AnswerGenerator, SafetyGuard
@@ -26,9 +22,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # MedicalChatService
 # ---------------------------------------------------------------------------
-
-# 默认 NER 检查点（镜像 webui.load_model）
-_DEFAULT_NER_CHECKPOINT = "best_roberta_rnn_model_ent_aug.pt"
 
 
 class MedicalChatService:
@@ -57,13 +50,16 @@ class MedicalChatService:
         prompt_builder=None,        # PromptBuilder 或 None → 自动创建
         answer_generator=None,      # AnswerGenerator 或 None → 自动创建
         safety_guard=None,          # SafetyGuard 或 None → 自动创建
-        ner_checkpoint: str = _DEFAULT_NER_CHECKPOINT,
     ):
         # ---- 检索流水线 ----
         if hybrid_retriever is not None:
             self.hybrid_retriever = hybrid_retriever
         else:
-            _kg = kg_retriever or self._load_kg_retriever(ner_checkpoint)
+            if kg_retriever is None:
+                from pathlib import Path
+                from medrag.infrastructure.ner import load_ner_model
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+                kg_retriever = load_ner_model(project_root)
 
             from medrag.vectors.toyhom_retriever import ToyhomQARetriever
             _toyhom = toyhom_retriever or ToyhomQARetriever()
@@ -71,7 +67,7 @@ class MedicalChatService:
             _router = router or QueryRouter()
 
             self.hybrid_retriever = HybridRetriever(
-                kg_retriever=_kg,
+                kg_retriever=kg_retriever,
                 toyhom_retriever=_toyhom,
                 router=_router,
             )
@@ -225,55 +221,3 @@ class MedicalChatService:
         footer = self.safety_guard.append_safety_notice("", risk_info)
         if footer.strip():
             yield {"type": "content", "content": "\n\n" + footer}
-
-    # ------------------------------------------------------------------
-    # 内部：NER 模型加载器
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _load_kg_retriever(checkpoint: str) -> KGRetriever:
-        """加载 NER 模型并构建 KGRetriever。
-
-        镜像了 ``webui.py`` 中的 ``load_model()`` 路径。若检查点文件
-        缺失，知识图谱搜索将不可用。
-        """
-        import pickle
-
-        import torch
-        from transformers import BertTokenizer
-
-        from medrag.ner import model as zwk
-
-        with open(PROJECT_ROOT / "tmp_data" / "tag2idx.npy", "rb") as f:
-            tag2idx = pickle.load(f)
-        idx2tag = list(tag2idx)
-
-        rule = zwk.rule_find()
-        tfidf_r = zwk.tfidf_alignment()
-
-        tokenizer = BertTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext")
-        bert = zwk.Bert_Model(
-            "hfl/chinese-roberta-wwm-ext",
-            hidden_size=128,
-            tag_num=len(tag2idx),
-            bi=True,
-        )
-
-        checkpoint_path = PROJECT_ROOT / "model" / checkpoint
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        bert.load_state_dict(
-            torch.load(checkpoint_path, map_location=device, weights_only=True)
-        )
-        bert = bert.to(device)
-        bert.eval()
-
-        logger.info("KGRetriever loaded (NER checkpoint=%s, device=%s)", checkpoint, device)
-
-        return KGRetriever(
-            bert_model=bert,
-            bert_tokenizer=tokenizer,
-            rule=rule,
-            tfidf_r=tfidf_r,
-            device=device,
-            idx2tag=idx2tag,
-        )

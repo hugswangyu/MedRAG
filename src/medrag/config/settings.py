@@ -109,4 +109,22 @@ class Settings:
     ollama_model: str = _env_str("OLLAMA_MODEL", "qwen:32b")
 
 
+    # Storage paths (computed relative to BASE_DIR)
+    sessions_path: Path = _env_path(
+        "SESSIONS_PATH", str(BASE_DIR.parent / "tmp_data" / "sessions.json")
+    )
+    documents_index_path: Path = _env_path(
+        "DOCUMENTS_INDEX_PATH", str(BASE_DIR.parent / "tmp_data" / "documents.json")
+    )
+    credentials_path: Path = _env_path(
+        "CREDENTIALS_PATH", str(BASE_DIR.parent / "tmp_data" / "user_credentials.json")
+    )
+    ner_checkpoint_path: Path = _env_path(
+        "NER_CHECKPOINT_PATH", str(BASE_DIR.parent / "model" / "best_roberta_rnn_model_ent_aug.pt")
+    )
+    ner_tag2idx_path: Path = _env_path(
+        "NER_TAG2IDX_PATH", str(BASE_DIR.parent / "tmp_data" / "tag2idx.npy")
+    )
+
+
 settings = Settings()

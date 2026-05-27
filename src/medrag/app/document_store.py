@@ -1,22 +1,23 @@
 """文档管理：内存 job 追踪 + JSON 文档索引。
 
-Jobs 在内存中，重启丢失。文档索引持久化到 ``tmp_data/documents.json``。
+Jobs 在内存中，重启丢失。文档索引持久化到 JSON 文件。
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+from medrag.config.settings import settings
+from medrag.infrastructure.storage import JsonStore
 
 from .schemas import JobStepItem, DocumentItem
 
 logger = logging.getLogger(__name__)
 
-_DOC_INDEX_FILE = os.path.join("tmp_data", "documents.json")
+_doc_store = JsonStore(str(settings.documents_index_path))
 
 # ---- 内存 Job 追踪 ----
 _jobs: Dict[str, dict] = {}
@@ -59,24 +60,8 @@ def update_job_step(job_id: str, step_key: str, percent: int, status: str = "run
 # ---- JSON 文档索引 ----
 
 
-def _load_index() -> list:
-    try:
-        with open(_DOC_INDEX_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-
-def _save_index(docs: list) -> None:
-    folder = os.path.dirname(_DOC_INDEX_FILE)
-    if folder and not os.path.exists(folder):
-        os.makedirs(folder, exist_ok=True)
-    with open(_DOC_INDEX_FILE, "w") as f:
-        json.dump(docs, f, indent=2, ensure_ascii=False)
-
-
 def get_documents() -> List[DocumentItem]:
-    docs = _load_index()
+    docs = _doc_store.read()
     return [
         DocumentItem(
             filename=d["filename"],
@@ -88,7 +73,7 @@ def get_documents() -> List[DocumentItem]:
 
 
 def add_document(filename: str, file_type: str = "", chunk_count: int = 0) -> None:
-    docs = _load_index()
+    docs = _doc_store.read()
     # 去重
     docs = [d for d in docs if d.get("filename") != filename]
     docs.append({
@@ -97,20 +82,20 @@ def add_document(filename: str, file_type: str = "", chunk_count: int = 0) -> No
         "chunk_count": chunk_count,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     })
-    _save_index(docs)
+    _doc_store.write(docs)
 
 
 def remove_document(filename: str) -> bool:
-    docs = _load_index()
+    docs = _doc_store.read()
     filtered = [d for d in docs if d.get("filename") != filename]
     if len(filtered) == len(docs):
         return False
-    _save_index(filtered)
+    _doc_store.write(filtered)
     return True
 
 
 def get_document_by_filename(filename: str) -> Optional[dict]:
-    for d in _load_index():
+    for d in _doc_store.read():
         if d.get("filename") == filename:
             return d
     return None

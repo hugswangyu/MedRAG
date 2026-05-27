@@ -1,41 +1,19 @@
-"""会话持久化：JSON 文件存储。
-
-在 ``tmp_data/sessions.json`` 中维护所有会话及其消息。
-"""
+"""会话持久化：JSON 文件存储。"""
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+from medrag.config.settings import settings
+from medrag.infrastructure.storage import JsonStore
 
 from .schemas import SessionSummary, SessionMessage, SessionDetailResponse
 
 logger = logging.getLogger(__name__)
 
-_STORAGE_FILE = os.path.join("tmp_data", "sessions.json")
-
-# ---------------------------------------------------------------------------
-# I/O
-# ---------------------------------------------------------------------------
-
-
-def _load() -> Dict[str, list]:
-    try:
-        with open(_STORAGE_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _save(data: Dict[str, list]) -> None:
-    folder = os.path.dirname(_STORAGE_FILE)
-    if folder and not os.path.exists(folder):
-        os.makedirs(folder, exist_ok=True)
-    with open(_STORAGE_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+_store = JsonStore(str(settings.sessions_path))
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +28,7 @@ def add_message(
     rag_trace: Optional[dict] = None,
 ) -> None:
     """向会话追加一条消息。"""
-    sessions = _load()
+    sessions = _store.read()
     entry = {
         "type": msg_type,
         "content": content,
@@ -59,11 +37,11 @@ def add_message(
     if rag_trace:
         entry["rag_trace"] = rag_trace
     sessions.setdefault(session_id, []).append(entry)
-    _save(sessions)
+    _store.write(sessions)
 
 
 def get_sessions() -> List[SessionSummary]:
-    sessions = _load()
+    sessions = _store.read()
     result = []
     for sid, msgs in sessions.items():
         updated = msgs[-1]["timestamp"] if msgs else ""
@@ -79,7 +57,7 @@ def get_sessions() -> List[SessionSummary]:
 
 
 def get_session(session_id: str) -> Optional[SessionDetailResponse]:
-    sessions = _load()
+    sessions = _store.read()
     msgs = sessions.get(session_id)
     if msgs is None:
         return None
@@ -97,9 +75,9 @@ def get_session(session_id: str) -> Optional[SessionDetailResponse]:
 
 
 def delete_session(session_id: str) -> bool:
-    sessions = _load()
+    sessions = _store.read()
     if session_id not in sessions:
         return False
     del sessions[session_id]
-    _save(sessions)
+    _store.write(sessions)
     return True
