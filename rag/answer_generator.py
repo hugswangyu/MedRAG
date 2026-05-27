@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import settings
+from llm import get_llm_client
 
 
 class AnswerGenerator:
@@ -31,46 +32,17 @@ class AnswerGenerator:
 
         if self.provider == "deepseek":
             self._model = settings.deepseek_answer_model
-            self._client = self._create_deepseek_client()
         elif self.provider == "zhipuai":
             self._model = settings.zhipuai_model
-            self._client = self._create_zhipuai_client()
         elif self.provider == "ollama":
             self._model = settings.ollama_model
-            self._client = self._create_ollama_client()
         else:
             raise ValueError(
                 f"不支持的 LLM_PROVIDER: {self.provider!r}，"
                 f"可选值为 deepseek / zhipuai / ollama"
             )
 
-    # ------------------------------------------------------------------
-    # Client factories
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _create_deepseek_client():
-        from openai import OpenAI
-
-        return OpenAI(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-        )
-
-    @staticmethod
-    def _create_zhipuai_client():
-        from zhipuai import ZhipuAI
-
-        return ZhipuAI(api_key=settings.zhipuai_api_key)
-
-    @staticmethod
-    def _create_ollama_client():
-        from openai import OpenAI
-
-        return OpenAI(
-            api_key="ollama",  # ollama doesn't require a real key
-            base_url=settings.ollama_base_url,
-        )
+        self._client = get_llm_client(self.provider)
 
     # ------------------------------------------------------------------
     # Public API

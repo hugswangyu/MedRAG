@@ -21,9 +21,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import py2neo
-from openai import OpenAI
 
 from config.settings import settings
+from llm import get_llm_client
 import ner_model as zwk
 
 # ---------------------------------------------------------------------------
@@ -97,14 +97,7 @@ class KGRetriever:
 
         self.neo4j = neo4j_client or self._create_neo4j_client()
 
-        # DeepSeek client for intent recognition.
-        # TODO: If you refactor Intent_Recognition out of webui.py into a
-        # shared module (e.g. intent.py), replace this inline client with an
-        # import of that shared function.
-        self.llm = OpenAI(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-        )
+        self.llm = get_llm_client("deepseek")
 
     # ------------------------------------------------------------------
     # Internal helpers

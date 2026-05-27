@@ -1,15 +1,12 @@
 import os
 from pathlib import Path
 import streamlit as st
-from openai import OpenAI
 
 from config.settings import settings
+from llm import get_llm_client
 
 # LLM client (used for case summarisation)
-deepseek_client = OpenAI(
-    api_key=settings.deepseek_api_key,
-    base_url=settings.deepseek_base_url,
-)
+deepseek_client = get_llm_client("deepseek")
 
 
 # ---------------------------------------------------------------------------
