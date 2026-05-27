@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Generator, Optional
 
 from medrag.config.settings import settings
+from medrag.llm import get_llm_client, get_llm_provider
 from medrag.rag import PromptBuilder, AnswerGenerator, SafetyGuard
 from medrag.retrieval import (
     HybridRetriever,
@@ -51,6 +52,10 @@ class MedicalChatService:
         answer_generator=None,      # AnswerGenerator 或 None → 自动创建
         safety_guard=None,          # SafetyGuard 或 None → 自动创建
     ):
+        # ---- 共享 LLM 客户端 ----
+        _llm_client = get_llm_client()
+        _llm_provider = get_llm_provider()
+
         # ---- 检索流水线 ----
         if hybrid_retriever is not None:
             self.hybrid_retriever = hybrid_retriever
@@ -59,12 +64,12 @@ class MedicalChatService:
                 from pathlib import Path
                 from medrag.infrastructure.ner import load_ner_model
                 project_root = Path(__file__).resolve().parent.parent.parent.parent
-                kg_retriever = load_ner_model(project_root)
+                kg_retriever = load_ner_model(project_root, llm_client=_llm_client)
 
             from medrag.vectors.toyhom_retriever import ToyhomQARetriever
             _toyhom = toyhom_retriever or ToyhomQARetriever()
 
-            _router = router or QueryRouter()
+            _router = router or QueryRouter(llm_client=_llm_client)
 
             self.hybrid_retriever = HybridRetriever(
                 kg_retriever=kg_retriever,
@@ -75,7 +80,7 @@ class MedicalChatService:
         # ---- 生成流水线 ----
         self.reranker = reranker or get_reranker()
         self.prompt_builder = prompt_builder or PromptBuilder()
-        self.answer_generator = answer_generator or AnswerGenerator()
+        self.answer_generator = answer_generator or AnswerGenerator(llm_provider=_llm_provider)
         self.safety_guard = safety_guard or SafetyGuard()
 
     # ------------------------------------------------------------------

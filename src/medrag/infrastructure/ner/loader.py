@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 def load_ner_model(
     project_root: str | Path,
     checkpoint: str = "best_roberta_rnn_model_ent_aug.pt",
+    llm_client=None,
 ) -> KGRetriever:
     """加载 NER 流水线（RoBERTa-RNN + 规则 + TF-IDF），返回可用的 KGRetriever。"""
     root = Path(project_root)
@@ -55,4 +56,5 @@ def load_ner_model(
         tfidf_r=tfidf_r,
         device=device,
         idx2tag=idx2tag,
+        llm_client=llm_client,
     )

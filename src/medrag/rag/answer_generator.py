@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from medrag.config.settings import settings
-from medrag.llm import get_llm_client
+from medrag.llm import get_llm_provider
+from medrag.llm.provider import LLMProvider
 
 
 class AnswerGenerator:
@@ -13,29 +13,15 @@ class AnswerGenerator:
 
         generator = AnswerGenerator()
         answer = generator.generate(prompt)
+
+        # 注入自定义 provider:
+        generator = AnswerGenerator(llm_provider=get_llm_provider("ollama"))
     """
 
-    def __init__(self, provider: str | None = None):
-        """
-        Args:
-            provider: ``"deepseek"`` | ``"zhipuai"`` | ``"ollama"``。
-                      默认为 ``settings.llm_provider``。
-        """
-        self.provider = (provider or settings.llm_provider).strip().lower()
-
-        if self.provider == "deepseek":
-            self._model = settings.deepseek_answer_model
-        elif self.provider == "zhipuai":
-            self._model = settings.zhipuai_model
-        elif self.provider == "ollama":
-            self._model = settings.ollama_model
-        else:
-            raise ValueError(
-                f"不支持的 LLM_PROVIDER: {self.provider!r}，"
-                f"可选值为 deepseek / zhipuai / ollama"
-            )
-
-        self._client = get_llm_client(self.provider)
+    def __init__(self, llm_provider: LLMProvider | None = None):
+        self._provider = llm_provider or get_llm_provider()
+        self._client = self._provider.client
+        self._model = self._provider.default_model
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -61,7 +47,7 @@ class AnswerGenerator:
         except Exception as exc:
             provider = self.provider
             return (
-                f"抱歉，调用 {provider} 生成回答时出错：{exc}\n"
+                f"抱歉，调用 {self._provider.name} 生成回答时出错：{exc}\n"
                 f"请检查 API Key 是否正确、网络是否通畅。"
             )
 

@@ -4,8 +4,8 @@
 单个 KGRetriever 类中，提供统一的 ``search(query) -> List[Dict]`` 接口。
 
 不重写原有逻辑 —— NER 从 ``ner_model`` 导入，
-意图识别复用与 ``webui.Intent_Recognition`` 相同的提示词，
-Cypher 模式镜像了 ``webui.generate_prompt`` 的实现。
+意图识别复用已有的意图识别提示词，
+Cypher 模式镜像了原 generate_prompt 阶段的查询逻辑。
 """
 
 from __future__ import annotations
@@ -28,8 +28,7 @@ from medrag.ner import model as zwk
 #
 # 注意：keyword 顺序很重要。"治疗周期" 必须在 "治疗" 之前检查以避免
 # 错误匹配；"查询疾病所属科目" 是整句级别的检查
-# （参见 webui.py:217）。此列表完全镜像了 webui.generate_prompt
-# 中的 if/elif 链。
+# 此列表完全镜像了原 generate_prompt 中的 if/elif 链。
 # ---------------------------------------------------------------------------
 _INTENT_SPEC: List[tuple] = [
     ("简介",           "attribute",        "疾病简介",       None,       "疾病"),
@@ -53,13 +52,12 @@ _INTENT_SPEC: List[tuple] = [
 class KGRetriever:
     """Neo4j 医学知识图谱统一检索器。
 
-    依赖**现有**的 NER 流水线（``ner_model``），复制了 ``webui.generate_prompt``
-    中的 Cypher 模式。意图识别使用 DeepSeek 配合与 ``webui.Intent_Recognition``
-    相同的 few-shot 提示词。
+    依赖**现有**的 NER 流水线（``ner_model``），复用了已有的 Cypher 查询模式。
+    意图识别使用 DeepSeek 配合已有的 few-shot 意图识别提示词。
 
     用法::
 
-        # 获取 NER 组件（与 webui.load_model 相同）
+        # 获取 NER 组件
         rule = zwk.rule_find()
         tfidf_r = zwk.tfidf_alignment()
         ...
@@ -81,6 +79,7 @@ class KGRetriever:
         device,
         idx2tag,
         neo4j_client: Optional[py2neo.Graph] = None,
+        llm_client=None,
     ):
         self.bert_model = bert_model
         self.bert_tokenizer = bert_tokenizer
@@ -91,7 +90,7 @@ class KGRetriever:
 
         self.neo4j = neo4j_client or self._create_neo4j_client()
 
-        self.llm = get_llm_client("deepseek")
+        self.llm = llm_client or get_llm_client()
 
     # ------------------------------------------------------------------
     # 内部辅助方法
@@ -124,16 +123,13 @@ class KGRetriever:
     # ------------------------------------------------------------------
     # 意图识别
     # ------------------------------------------------------------------
-    # 以下提示词从 webui.Intent_Recognition 复制而来，以避免导入
-    # 依赖 Streamlit 的模块。如果将意图识别提取到共享工具模块中，
-    # 改从这里导入。
+    # 以下提示词从原 Intent_Recognition 模块复制而来，避免循环导入。
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Cypher 查询辅助方法
     # ------------------------------------------------------------------
-    # 这些方法复制了 webui.py 中的 add_shuxing_prompt / add_lianxi_prompt
-    # 函数，但返回原始数据而非提示字符串。
+    # 查询属性/关系并返回原始数据，而非提示字符串。
     # ------------------------------------------------------------------
 
     def _query_attribute(self, entity: str, attribute: str) -> Optional[str]:
