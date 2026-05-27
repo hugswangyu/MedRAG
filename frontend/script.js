@@ -14,9 +14,7 @@ createApp({
             isComposing: false,
             knowledgeBase: '全科',
             knowledgeBases: [
-                '全科', '心内科', '神经内科', '儿科', '骨科',
-                '妇产科', '消化内科', '呼吸内科', '内分泌科', '肿瘤科',
-                '泌尿外科', '普外科', '眼科', '耳鼻喉科', '皮肤科'
+                '全科', '男科', '内科', '妇产科', '肿瘤科', '儿科', '外科'
             ],
             documents: [],
             documentsLoading: false,
