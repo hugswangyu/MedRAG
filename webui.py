@@ -16,7 +16,7 @@ deepseek_client = get_llm_client("deepseek")
 @st.cache_resource
 def _init_chat_service():
     """Load MedicalChatService.  Cached so the NER model loads once."""
-    from api.chat_service import MedicalChatService
+    from service.chat_service import MedicalChatService
 
     try:
         return {"service": MedicalChatService(), "error": None}
