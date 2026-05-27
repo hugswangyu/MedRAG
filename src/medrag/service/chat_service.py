@@ -115,20 +115,33 @@ class MedicalChatService:
             top_k=settings.rerank_top_k,
         )
 
-        # 4. 构建提示词（病例上下文直接注入 —— 若有则始终包含，绕过路由决策）
+        # 4. 计算检索质量
+        retrieval_quality = {
+            "has_kg": bool(retrieval["kg_results"]),
+            "has_qa": bool(retrieval["toyhom_results"]),
+            "confidence": (
+                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"])
+                else "none"
+            ),
+        }
+
+        # 5. 构建提示词
         prompt = self.prompt_builder.build_answer_prompt(
             query=query,
             kg_results=retrieval["kg_results"],
             toyhom_results=retrieval["toyhom_results"],
             case_context=user_case_summary,
             route=retrieval["route"],
+            retrieval_quality=retrieval_quality,
         )
 
-        # 5. 生成回答
+        # 6. 生成回答
         answer = self.answer_generator.generate(prompt)
 
-        # 6. 注入安全提示
-        answer = self.safety_guard.append_safety_notice(answer, risk_info)
+        # 7. 注入安全提示
+        answer = self.safety_guard.append_safety_notice(
+            answer, risk_info, retrieval_quality=retrieval_quality["confidence"],
+        )
 
         return {
             "answer": answer,
@@ -182,7 +195,17 @@ class MedicalChatService:
             top_k=settings.rerank_top_k,
         )
 
-        # 4. 构建提示词
+        # 4. 计算检索质量
+        retrieval_quality = {
+            "has_kg": bool(retrieval["kg_results"]),
+            "has_qa": bool(retrieval["toyhom_results"]),
+            "confidence": (
+                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"])
+                else "none"
+            ),
+        }
+
+        # 5. 构建提示词
         yield {
             "type": "rag_step",
             "step": {"key": "prompt", "label": "构建提示词", "icon": "📝"},
@@ -193,6 +216,7 @@ class MedicalChatService:
             toyhom_results=retrieval["toyhom_results"],
             case_context=user_case_summary,
             route=retrieval["route"],
+            retrieval_quality=retrieval_quality,
         )
 
         # 5. 发送检索溯源信息
@@ -223,6 +247,8 @@ class MedicalChatService:
             yield {"type": "content", "content": token}
 
         # 7. 安全提示尾注（作为最后一个 content 事件发送）
-        footer = self.safety_guard.append_safety_notice("", risk_info)
+        footer = self.safety_guard.append_safety_notice(
+            "", risk_info, retrieval_quality=retrieval_quality["confidence"],
+        )
         if footer.strip():
             yield {"type": "content", "content": "\n\n" + footer}

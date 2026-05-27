@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from medrag.prompts import (
     MEDICAL_ANSWER_PROMPT,
+    QUERY_TYPE_HINTS,
     CONTEXT_CASE_HEADER,
     CONTEXT_KG_HEADER,
     CONTEXT_TOYHOM_HEADER,
@@ -14,6 +15,19 @@ from medrag.prompts import (
 
 MAX_PER_SOURCE = 5          # 每个来源在提示词中的最大结果数
 MAX_RESULT_CHARS = 400      # 每条结果截断长度
+
+# 检索置信度指令
+_CONFIDENCE_NONE = (
+    "\n\n⚠️ **系统提示**：知识库中未检索到直接相关资料。"
+    '请基于通用医学知识回答，并在⑤中标注“该信息未在知识库中检索到，'
+    '基于通用医学知识提供参考，请务必核实”。'
+    '绝对禁止因缺少检索资料而拒答基础医学事实。'
+)
+_CONFIDENCE_LOW = (
+    '\n\n⚠️ **系统提示**：检索到的资料置信度较低或存在矛盾。'
+    '回答时请在⑤中标注“不同资料对此存在差异，请以医生意见为准”。'
+)
+_CONFIDENCE_NONE_NOTE = '\n\n⚠️ 知识库中未检索到直接相关资料，请基于通用医学知识回答，并标注不确定性。'
 
 
 class PromptBuilder:
@@ -28,6 +42,7 @@ class PromptBuilder:
             toyhom_results=toyhom_results,
             case_context=None,
             route=route,
+            retrieval_quality={"has_kg": True, "has_qa": False, "confidence": "high"},
         )
         # → 将 *prompt* 喂给 DeepSeek / OpenAI
     """
@@ -39,6 +54,7 @@ class PromptBuilder:
         toyhom_results: Optional[List[Dict]] = None,
         case_context: Optional[str] = None,
         route: Optional[Dict] = None,
+        retrieval_quality: Optional[Dict] = None,
     ) -> str:
         """构建用于回答 LLM 的最终提示词字符串。
 
@@ -47,8 +63,27 @@ class PromptBuilder:
             kg_results: KGRetriever.search() 输出（已重排序）。
             toyhom_results: ToyhomQARetriever.search() 输出（已重排序）。
             case_context: 预先计算的用户病例摘要，或 None。
-            route: 路由器决策字典（目前未用，预留给未来基于 query_type 的提示词适配）。
+            route: 路由器决策字典，query_type 用于注入分类指令。
+            retrieval_quality: {"has_kg": bool, "has_qa": bool, "confidence": "high"/"low"/"none"}。
         """
+        # --- 根据 query_type 注入分类指令 ---
+        query_type = (
+            route.get("query_type", "general_medical_qa")
+            if route else "general_medical_qa"
+        )
+        type_hint = QUERY_TYPE_HINTS.get(query_type, QUERY_TYPE_HINTS["general_medical_qa"])
+        system_prompt = MEDICAL_ANSWER_PROMPT + "\n\n## 当前问题类型\n" + type_hint
+
+        # --- 检索置信度指令 ---
+        confidence_note = ""
+        if retrieval_quality:
+            has_any = retrieval_quality.get("has_kg") or retrieval_quality.get("has_qa")
+            conf = retrieval_quality.get("confidence", "high")
+            if not has_any or conf == "none":
+                confidence_note = _CONFIDENCE_NONE_NOTE
+            elif conf == "low":
+                confidence_note = _CONFIDENCE_NONE_NOTE
+
         # --- 组装上下文块 ---
         sections: list[str] = []
 
@@ -79,7 +114,8 @@ class PromptBuilder:
         # --- 最终提示词 ---
         context = "\n".join(sections)
         return (
-            MEDICAL_ANSWER_PROMPT
+            system_prompt
+            + confidence_note
             + context
             + f"\n\n## 用户当前问题\n{query}\n\n请根据以上资料回答用户的问题。"
         )
