@@ -35,7 +35,22 @@ createApp({
                 username: '',
                 password: ''
             },
-            authLoading: false
+            authLoading: false,
+            authError: '',
+            documentError: '',
+            uiMessage: {
+                text: '',
+                type: 'info'
+            },
+            uiMessageTimer: null,
+            confirmDialog: {
+                open: false,
+                title: '',
+                message: '',
+                confirmText: '确认',
+                tone: 'default',
+                resolve: null
+            }
         };
     },
     computed: {
@@ -57,8 +72,71 @@ createApp({
         this.stopUploadJobPolling();
         this.stopAllDeleteJobPolling();
         Object.values(this.deleteRemoveTimers).forEach(timer => clearTimeout(timer));
+        if (this.uiMessageTimer) {
+            clearTimeout(this.uiMessageTimer);
+        }
     },
     methods: {
+        notify(text, type = 'info') {
+            this.uiMessage = { text, type };
+            if (this.uiMessageTimer) {
+                clearTimeout(this.uiMessageTimer);
+            }
+            this.uiMessageTimer = setTimeout(() => {
+                this.uiMessage = { text: '', type: 'info' };
+                this.uiMessageTimer = null;
+            }, 4200);
+        },
+
+        requestConfirm({ title, message, confirmText = '确认', tone = 'default' }) {
+            return new Promise(resolve => {
+                this.confirmDialog = {
+                    open: true,
+                    title,
+                    message,
+                    confirmText,
+                    tone,
+                    resolve
+                };
+                this.$nextTick(() => {
+                    if (this.$refs.confirmDialog && !this.$refs.confirmDialog.open) {
+                        this.$refs.confirmDialog.showModal();
+                    }
+                });
+            });
+        },
+
+        settleConfirm(value) {
+            const resolve = this.confirmDialog.resolve;
+            this.confirmDialog.resolve = null;
+            if (this.$refs.confirmDialog?.open) {
+                this.$refs.confirmDialog.close(value ? 'confirm' : 'cancel');
+            }
+            if (resolve) {
+                resolve(value);
+            }
+        },
+
+        acceptConfirm() {
+            this.settleConfirm(true);
+        },
+
+        cancelConfirm() {
+            this.settleConfirm(false);
+        },
+
+        handleDialogClose() {
+            if (this.confirmDialog.resolve) {
+                this.settleConfirm(false);
+            }
+            this.confirmDialog.open = false;
+        },
+
+        switchAuthMode() {
+            this.authMode = this.authMode === 'login' ? 'register' : 'login';
+            this.authError = '';
+        },
+
         configureMarked() {
             marked.setOptions({
                 highlight: function(code, lang) {
@@ -113,11 +191,12 @@ createApp({
             const username = this.authForm.username.trim();
             const password = this.authForm.password.trim();
             if (!username || !password) {
-                alert('用户名和密码不能为空');
+                this.authError = '请输入用户名和密码。';
                 return;
             }
 
             this.authLoading = true;
+            this.authError = '';
             try {
                 const endpoint = this.authMode === 'login' ? '/auth/login' : '/auth/register';
                 const payload = { username, password };
@@ -140,8 +219,9 @@ createApp({
                 this.messages = [];
                 this.sessionId = 'session_' + Date.now();
                 this.activeNav = 'newChat';
+                this.notify(this.authMode === 'login' ? '已登录。' : '账号已创建并登录。', 'success');
             } catch (error) {
-                alert(error.message);
+                this.authError = error.message;
             } finally {
                 this.authLoading = false;
             }
@@ -181,7 +261,7 @@ createApp({
 
         async handleSend() {
             if (!this.isAuthenticated) {
-                alert('请先登录');
+                this.authError = '请先登录后再发送问题。';
                 return;
             }
 
@@ -280,6 +360,7 @@ createApp({
                 } else {
                     this.messages[botMsgIdx].isThinking = false;
                     this.messages[botMsgIdx].text = `抱歉，出了点问题：${error.message}`;
+                    this.notify('回答生成失败，请稍后重试。', 'error');
                 }
             } finally {
                 this.isLoading = false;
@@ -315,9 +396,16 @@ createApp({
         },
 
         handleClearChat() {
-            if (confirm('确定要清空当前对话吗？')) {
+            this.requestConfirm({
+                title: '清空当前对话',
+                message: '清空后当前窗口里的消息会被移除，但不会删除历史会话。',
+                confirmText: '清空',
+                tone: 'danger'
+            }).then(confirmed => {
+                if (!confirmed) return;
                 this.messages = [];
-            }
+                this.notify('当前对话已清空。', 'success');
+            });
         },
 
         async handleHistory() {
@@ -332,7 +420,7 @@ createApp({
                 const data = await response.json();
                 this.sessions = data.sessions;
             } catch (error) {
-                alert('加载历史记录失败：' + error.message);
+                this.notify('加载历史记录失败：' + error.message, 'error');
             }
         },
 
@@ -357,13 +445,19 @@ createApp({
                     this.scrollToBottom();
                 });
             } catch (error) {
-                alert('加载会话失败：' + error.message);
+                this.notify('加载会话失败：' + error.message, 'error');
                 this.messages = [];
             }
         },
 
         async deleteSession(sessionId) {
-            if (!confirm(`确定要删除会话 "${sessionId}" 吗？`)) {
+            const confirmed = await this.requestConfirm({
+                title: '删除历史会话',
+                message: `确定要删除会话 "${sessionId}" 吗？这条记录删除后不可恢复。`,
+                confirmText: '删除',
+                tone: 'danger'
+            });
+            if (!confirmed) {
                 return;
             }
 
@@ -386,10 +480,10 @@ createApp({
                 }
 
                 if (payload.message) {
-                    alert(payload.message);
+                    this.notify(payload.message, 'success');
                 }
             } catch (error) {
-                alert('删除会话失败：' + error.message);
+                this.notify('删除会话失败：' + error.message, 'error');
             }
         },
 
@@ -417,6 +511,7 @@ createApp({
 
         async loadDocuments() {
             this.documentsLoading = true;
+            this.documentError = '';
             try {
                 const response = await this.authFetch('/documents');
                 if (!response.ok) {
@@ -426,7 +521,7 @@ createApp({
                 const data = await response.json();
                 this.documents = this.mergeDocumentsWithActiveDeletes(data.documents);
             } catch (error) {
-                alert('加载病历列表失败：' + error.message);
+                this.documentError = '加载病历列表失败：' + error.message;
             } finally {
                 this.documentsLoading = false;
             }
@@ -580,11 +675,12 @@ createApp({
 
         async uploadDocument() {
             if (!this.selectedFile) {
-                alert('请先选择文件');
+                this.documentError = '请先选择文件。';
                 return;
             }
 
             this.isUploading = true;
+            this.documentError = '';
             this.uploadProgress = '正在上传...';
             this.uploadSteps = this.createUploadSteps();
             this.uploadProgressCollapsed = false;
@@ -598,6 +694,7 @@ createApp({
             } catch (error) {
                 this.updateUploadStep('upload', 100, 'failed', error.message);
                 this.uploadProgress = '上传失败：' + error.message;
+                this.documentError = '上传失败：' + error.message;
                 this.isUploading = false;
             }
         },
@@ -739,10 +836,17 @@ createApp({
             if (this.isDeletingDocument(filename)) {
                 return;
             }
-            if (!confirm(`确定要删除病历 "${filename}" 吗？这将同时删除 Milvus 中的所有相关向量。`)) {
+            const confirmed = await this.requestConfirm({
+                title: '删除病历',
+                message: `确定要删除病历 "${filename}" 吗？这将同时删除 Milvus 中的所有相关向量。`,
+                confirmText: '删除',
+                tone: 'danger'
+            });
+            if (!confirmed) {
                 return;
             }
 
+            this.documentError = '';
             this.clearDeleteRemovalTimer(filename);
             this.setDeleteJob(filename, {
                 status: 'running',
@@ -781,6 +885,7 @@ createApp({
                     collapsed: false,
                     steps: this.deleteJobs[filename]?.steps || this.createDeleteSteps()
                 });
+                this.documentError = '删除病历失败：' + error.message;
             }
         },
 
