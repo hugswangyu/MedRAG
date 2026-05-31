@@ -230,6 +230,8 @@ class MedicalChatService:
                     "filename": r.get("source", r.get("id", "")),
                     "text": (r.get("answer") or r.get("text") or r.get("evidence", ""))[:200],
                     "rrf_rank": i + 1,
+                    "rrf_score": r.get("rrf_score", 0),
+                    "source_rank": r.get("rrf_source_rank", 0),
                 }
                 for i, r in enumerate(retrieval["all_results"][:10])
             ],

@@ -19,11 +19,6 @@ logger = logging.getLogger(__name__)
 # 共享辅助函数
 # ---------------------------------------------------------------------------
 
-SOURCE_BONUS: Dict[str, float] = {
-    "neo4j_kg": 0.20,
-    "toyhom_qa": 0.0,
-    "user_case": 0.30,
-}
 DEFAULT_SCORE = 0.50
 
 
@@ -59,12 +54,12 @@ class SimpleReranker:
             return []
         keywords = _extract_keywords(query)
         for r in results:
-            base = SOURCE_BONUS.get(r.get("source", ""), 0.0) + r.get("score", DEFAULT_SCORE)
+            base = r.get("rrf_score") or r.get("score", DEFAULT_SCORE)
             kw_hits = sum(1 for kw in keywords if kw in _result_text(r)) if keywords else 0
             kw_bonus = min(kw_hits * KEYWORD_HIT_BONUS, MAX_KEYWORD_BONUS)
-            r["final_score"] = round(base + kw_bonus, 4)
+            r["final_score"] = round(float(base) + kw_bonus, 4)
             r["rerank_reason"] = (
-                f"source={r.get('source')}, base={base:.3f}"
+                f"source={r.get('source')}, base={float(base):.4f}"
                 + (f", kw×{kw_hits} +{kw_bonus:.2f}" if kw_bonus else "")
             )
         return sorted(results, key=lambda r: r["final_score"], reverse=True)[:top_k]
@@ -112,11 +107,9 @@ class CrossEncoderReranker:
         scores = self.model.predict(pairs, show_progress_bar=False)
 
         for r, ce_score in zip(results, scores):
-            src_bonus = SOURCE_BONUS.get(r.get("source", ""), 0.0)
-            r["final_score"] = round(float(ce_score) + src_bonus, 4)
+            r["final_score"] = round(float(ce_score), 4)
             r["rerank_reason"] = (
                 f"source={r.get('source')}, ce={ce_score:.4f}"
-                + (f" +src_bonus={src_bonus:.2f}" if src_bonus else "")
             )
 
         return sorted(results, key=lambda r: r["final_score"], reverse=True)[:top_k]
