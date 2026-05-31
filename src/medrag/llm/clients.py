@@ -28,12 +28,14 @@ def get_llm_client(provider: str | None = None):
             _clients[provider] = _create_deepseek()
         elif provider == "zhipuai":
             _clients[provider] = _create_zhipuai()
+        elif provider == "qwen":
+            _clients[provider] = _create_qwen()
         elif provider == "ollama":
             _clients[provider] = _create_ollama()
         else:
             raise ValueError(
                 f"不支持的 LLM_PROVIDER: {provider!r}，"
-                f"可选值为 deepseek / zhipuai / ollama"
+                f"可选值为 deepseek / zhipuai / qwen / ollama"
             )
 
     return _clients[provider]
@@ -50,6 +52,14 @@ def _create_deepseek():
 def _create_zhipuai():
     from zhipuai import ZhipuAI
     return ZhipuAI(api_key=settings.zhipuai_api_key)
+
+
+def _create_qwen():
+    from openai import OpenAI
+    return OpenAI(
+        api_key=settings.qwen_api_key,
+        base_url=settings.qwen_base_url,
+    )
 
 
 def _create_ollama():

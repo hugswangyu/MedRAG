@@ -103,10 +103,27 @@ class Settings:
     # ZhipuAI (智谱)
     zhipuai_api_key: str = _env_str("ZHIPUAI_API_KEY", "")
     zhipuai_model: str = _env_str("ZHIPUAI_MODEL", "glm-4-plus")
+    zhipuai_model_options: tuple[str, ...] = _env_tuple(
+        "ZHIPUAI_MODEL_OPTIONS",
+        ("glm-4-plus", "glm-4-flash", "glm-4-air", "glm-4-long"),
+    )
+
+    # Qwen (通义千问 / DashScope)
+    qwen_api_key: str = _env_str("QWEN_API_KEY", "")
+    qwen_base_url: str = _env_str("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    qwen_model: str = _env_str("QWEN_MODEL", "qwen-plus")
+    qwen_model_options: tuple[str, ...] = _env_tuple(
+        "QWEN_MODEL_OPTIONS",
+        ("qwen-plus", "qwen-max", "qwen-turbo", "qwen3-235b-a22b"),
+    )
 
     # Ollama
     ollama_base_url: str = _env_str("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     ollama_model: str = _env_str("OLLAMA_MODEL", "qwen:32b")
+    ollama_model_options: tuple[str, ...] = _env_tuple(
+        "OLLAMA_MODEL_OPTIONS",
+        ("qwen:32b",),
+    )
 
 
     # Storage paths (computed relative to BASE_DIR)

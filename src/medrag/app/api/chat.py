@@ -1,4 +1,4 @@
-"""SSE 流式聊天端点：POST /chat/stream。"""
+"""SSE 流式聊天端点：POST /chat/stream、GET /models。"""
 
 import asyncio
 import json
@@ -9,8 +9,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import StreamingResponse
 
+from medrag.config.settings import settings
+
 from ..dependencies import get_current_user
-from ..schemas import ChatRequest
+from ..schemas import ChatRequest, ModelItem, ModelsResponse
 from ..session_store import add_message
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,32 @@ def _get_service():
     return _chat_service
 
 
+@router.get("/models", response_model=ModelsResponse)
+async def list_models():
+    """返回已配置 API Key 的可用提供商及模型列表。"""
+    providers: list[ModelItem] = []
+    if settings.deepseek_api_key:
+        providers.append(ModelItem(
+            provider="deepseek",
+            models=list(settings.deepseek_model_options),
+        ))
+    if settings.zhipuai_api_key:
+        providers.append(ModelItem(
+            provider="zhipuai",
+            models=list(settings.zhipuai_model_options),
+        ))
+    if settings.qwen_api_key:
+        providers.append(ModelItem(
+            provider="qwen",
+            models=list(settings.qwen_model_options),
+        ))
+    providers.append(ModelItem(
+        provider="ollama",
+        models=list(settings.ollama_model_options),
+    ))
+    return ModelsResponse(providers=providers)
+
+
 @router.post("/stream")
 async def chat_stream(
     body: ChatRequest,
@@ -49,6 +77,8 @@ async def chat_stream(
             for event in service.stream_chat(
                 query=body.message,
                 department=department,
+                provider=body.provider,
+                model=body.model,
             ):
                 loop.call_soon_threadsafe(queue.put_nowait, event)
             loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel

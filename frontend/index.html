@@ -458,7 +458,7 @@
                     </div>
                     <span class="welcome-kicker">Evidence-based Medical Q&A</span>
                     <h3>您好！我是医疗智能助手</h3>
-                    <p>选择科室知识库后发起提问，系统会逐步返回答案，并展示推理依据和参考来源。</p>
+                    <p>请先选择相关科室并输入您的问题，系统将基于医学知识逐步进行分析，为您提供参考建议，并展示相关依据和参考来源。</p>
                     <div class="welcome-hints">
                         <span class="hint-chip">查询疾病诊疗指南</span>
                         <span class="hint-chip">解读检查检验报告</span>
@@ -637,6 +637,24 @@
                     </label>
                     <select v-model="knowledgeBase" aria-label="选择科室或知识库">
                         <option v-for="kb in knowledgeBases" :key="kb" :value="kb">{{ kb }}</option>
+                    </select>
+                </div>
+                <div class="model-selector">
+                    <label>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>
+                        </svg>
+                        模型：
+                    </label>
+                    <select v-model="selectedProvider" @change="onProviderChange" aria-label="选择LLM提供商">
+                        <option value="">默认</option>
+                        <option v-for="p in availableProviders" :key="p.provider" :value="p.provider">
+                            {{ providerLabel(p.provider) }}
+                        </option>
+                    </select>
+                    <select v-model="selectedModel" aria-label="选择模型" :disabled="currentProviderModels.length === 0">
+                        <option value="">默认</option>
+                        <option v-for="m in currentProviderModels" :key="m" :value="m">{{ m }}</option>
                     </select>
                 </div>
                 <div class="input-area">

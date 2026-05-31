@@ -25,11 +25,23 @@ class MessageResponse(BaseModel):
     message: str
 
 
+# --- Models ---
+class ModelItem(BaseModel):
+    provider: str
+    models: list[str]
+
+
+class ModelsResponse(BaseModel):
+    providers: list[ModelItem]
+
+
 # --- Chat ---
 class ChatRequest(BaseModel):
     message: str
     session_id: str
     knowledge_base: str = "全科"
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 # --- Sessions ---

@@ -157,6 +157,8 @@ class MedicalChatService:
         query: str,
         user_case_summary: Optional[str] = None,
         department: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Generator[Dict, None, None]:
         """流式版本的医疗 QA 流水线。
 
@@ -169,7 +171,15 @@ class MedicalChatService:
             query: 用户问题。
             user_case_summary: 可选的病例摘要。
             department: 可选科室过滤（非"全科"时传入 ToyhomQARetriever）。
+            provider: 可选 LLM 提供商（deepseek/zhipuai/ollama），默认使用 settings.llm_provider。
+            model: 可选模型名，默认使用对应 provider 的默认模型。
         """
+        # 动态创建 AnswerGenerator（仅在 provider 不同时切换）
+        if provider and provider != settings.llm_provider:
+            _gen_provider = get_llm_provider(provider)
+            answer_gen = AnswerGenerator(llm_provider=_gen_provider)
+        else:
+            answer_gen = self.answer_generator
         # 1. 风险检测
         yield {
             "type": "rag_step",
@@ -244,7 +254,7 @@ class MedicalChatService:
             "step": {"key": "generate", "label": "生成回答", "icon": "✨"},
         }
         full_answer = ""
-        for token in self.answer_generator.generate_stream(prompt):
+        for token in answer_gen.generate_stream(prompt, model=model):
             full_answer += token
             yield {"type": "content", "content": token}
 

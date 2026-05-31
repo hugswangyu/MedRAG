@@ -16,6 +16,9 @@ createApp({
             knowledgeBases: [
                 '全科', '男科', '内科', '妇产科', '肿瘤科', '儿科', '外科'
             ],
+            selectedProvider: '',
+            selectedModel: '',
+            availableProviders: [],
             documents: [],
             documentsLoading: false,
             selectedFile: null,
@@ -56,10 +59,16 @@ createApp({
     computed: {
         isAuthenticated() {
             return !!this.token && !!this.currentUser;
+        },
+        currentProviderModels() {
+            if (!this.selectedProvider) return [];
+            const p = this.availableProviders.find(x => x.provider === this.selectedProvider);
+            return p ? p.models : [];
         }
     },
     async mounted() {
         this.configureMarked();
+        this.fetchModels();
         if (this.token) {
             try {
                 await this.fetchMe();
@@ -298,7 +307,9 @@ createApp({
                     body: JSON.stringify({
                         message: text,
                         session_id: this.sessionId,
-                        knowledge_base: this.knowledgeBase
+                        knowledge_base: this.knowledgeBase,
+                        provider: this.selectedProvider || null,
+                        model: this.selectedModel || null
                     }),
                     signal: this.abortController.signal,
                 });
@@ -385,6 +396,31 @@ createApp({
             if (this.$refs.chatContainer) {
                 this.$refs.chatContainer.scrollTop = this.$refs.chatContainer.scrollHeight;
             }
+        },
+
+        async fetchModels() {
+            try {
+                const response = await fetch('/chat/models');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.availableProviders = data.providers;
+                    if (this.availableProviders.length > 0) {
+                        this.selectedProvider = this.availableProviders[0].provider;
+                        this.onProviderChange();
+                    }
+                }
+            } catch (_) {
+                // 模型列表不可用时静默降级，不影响聊天功能
+            }
+        },
+
+        onProviderChange() {
+            this.selectedModel = '';
+        },
+
+        providerLabel(name) {
+            const labels = { deepseek: 'DeepSeek', zhipuai: '智谱AI', qwen: '通义千问', ollama: 'Ollama' };
+            return labels[name] || name;
         },
 
         handleNewChat() {

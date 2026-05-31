@@ -29,11 +29,13 @@ def get_llm_provider(provider: str | None = None) -> LLMProvider:
         model = settings.deepseek_default_model
     elif name == "zhipuai":
         model = settings.zhipuai_model
+    elif name == "qwen":
+        model = settings.qwen_model
     elif name == "ollama":
         model = settings.ollama_model
     else:
         raise ValueError(
-            f"不支持的 LLM_PROVIDER: {name!r}，可选值为 deepseek / zhipuai / ollama"
+            f"不支持的 LLM_PROVIDER: {name!r}，可选值为 deepseek / zhipuai / qwen / ollama"
         )
 
     return LLMProvider(

@@ -27,35 +27,40 @@ class AnswerGenerator:
     # 公开 API
     # ------------------------------------------------------------------
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, model: str | None = None) -> str:
         """发送 *prompt* 到 LLM，返回生成的回答文本。
 
         Args:
             prompt: 完整的提示词字符串（通常来自
                     :meth:`PromptBuilder.build_answer_prompt`）。
+            model: 可选模型名，覆盖构造时绑定的默认模型。
 
         Returns:
             LLM 的响应文本，失败时返回友好的错误消息。
         """
         try:
             response = self._client.chat.completions.create(
-                model=self._model,
+                model=model or self._model,
                 messages=[{"role": "user", "content": prompt}],
             )
             return response.choices[0].message.content or ""
 
         except Exception as exc:
-            provider = self.provider
             return (
                 f"抱歉，调用 {self._provider.name} 生成回答时出错：{exc}\n"
                 f"请检查 API Key 是否正确、网络是否通畅。"
             )
 
-    def generate_stream(self, prompt: str):
-        """流式调用 LLM，逐 token yield 文本片段。"""
+    def generate_stream(self, prompt: str, model: str | None = None):
+        """流式调用 LLM，逐 token yield 文本片段。
+
+        Args:
+            prompt: 完整的提示词字符串。
+            model: 可选模型名，覆盖构造时绑定的默认模型。
+        """
         try:
             response = self._client.chat.completions.create(
-                model=self._model,
+                model=model or self._model,
                 messages=[{"role": "user", "content": prompt}],
                 stream=True,
             )
