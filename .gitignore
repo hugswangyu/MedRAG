@@ -1,8 +1,27 @@
 neo4j-community-5.18.1/
 model/chinese-roberta-wwm-ext/
 model/best_roberta_rnn_model_ent_aug.pt
+
+# Python build/cache artifacts
 __pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 
 # Environment / secrets
 .env
+
+# macOS/editor local files
+.DS_Store
+.claude/
+.agents/
+
+# Runtime state / local uploads
+tmp_data/*.json
+src/tmp_data/
+user_uploads/
 tmp_data/user_credentials.json
+
+# Local large datasets and ad-hoc test files
+Chinese-medical-dialogue-data/
+test_case.txt
