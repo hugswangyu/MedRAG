@@ -46,7 +46,7 @@ MAX_KEYWORD_BONUS = 0.30
 
 
 class SimpleReranker:
-    """规则评分：来源先验加权 + 关键词重叠。"""
+    """规则评分：以 rrf_score（或原始 score）为基 + N-gram 关键词命中加成。"""
 
     def rerank(self, query: str, results: List[Dict],
                top_k: int = 8) -> List[Dict]:
