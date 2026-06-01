@@ -21,45 +21,45 @@ class TestPromptBuilderQueryType:
         """不传 route 时默认 general_medical_qa。"""
         prompt = builder.build_answer_prompt(query="感冒了怎么办")
         assert "综合医疗问答" in prompt
-        assert "②分步骤呈现" in prompt
+        assert "不使用固定五段式" in prompt
 
     def test_disease_fact_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="糖尿病的病因是什么",
             route={"query_type": "disease_fact", "use_kg": True, "use_toyhom_qa": True},
         )
-        assert "事实查询" in prompt
-        assert "跳过第③层" in prompt
+        assert "事实短答" in prompt
+        assert "1-3 个短段落" in prompt
 
     def test_medication_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="阿莫西林的剂量是多少",
             route={"query_type": "medication", "use_kg": True, "use_toyhom_qa": True},
         )
-        assert "药物查询" in prompt
-        assert "剂量必须带单位" in prompt
+        assert "用药安全" in prompt
+        assert "剂量信息必须带单位" in prompt
 
     def test_symptom_consult_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="头痛发热是什么病",
             route={"query_type": "symptom_consult", "use_kg": True, "use_toyhom_qa": True},
         )
-        assert "鉴别诊断" in prompt
-        assert "③必须展开" in prompt
+        assert "症状鉴别" in prompt
+        assert "可能原因排序" in prompt
 
     def test_test_report_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="需要做什么检查",
             route={"query_type": "test_report", "use_kg": True, "use_toyhom_qa": True},
         )
-        assert "检查相关查询" in prompt
+        assert "检查/报告解读" in prompt
 
     def test_diet_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="糖尿病不能吃什么",
             route={"query_type": "diet", "use_kg": True, "use_toyhom_qa": True},
         )
-        assert "饮食相关查询" in prompt
+        assert "饮食建议" in prompt
 
     def test_department_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
@@ -74,6 +74,7 @@ class TestPromptBuilderQueryType:
             route={"query_type": "general_medical_qa", "use_kg": False, "use_toyhom_qa": True},
         )
         assert "综合医疗问答" in prompt
+        assert "自然组织" in prompt
 
     def test_unknown_query_type_falls_back(self, builder):
         """未知 query_type 回退到 general_medical_qa。"""
@@ -137,6 +138,27 @@ class TestPromptBuilderContextAssembly:
             query="感冒了怎么办", case_context="患者有高血压病史"
         )
         assert "患者有高血压病史" in prompt
+        assert "病例已有信息与通用建议" in prompt
+
+    def test_case_results_included(self, builder):
+        prompt = builder.build_answer_prompt(
+            query="我的血糖高吗",
+            case_results=[{"filename": "case.pdf", "answer": "空腹血糖 7.2 mmol/L"}],
+        )
+        assert "用户病例片段" in prompt
+        assert "空腹血糖 7.2 mmol/L" in prompt
+
+    def test_query_info_included(self, builder):
+        prompt = builder.build_answer_prompt(
+            query="嗓子疼怎么办",
+            query_info={
+                "normalized_query": "咽痛怎么办",
+                "rewrite_reason": "嗓子疼->咽痛",
+                "medical_terms": ["咽痛"],
+            },
+        )
+        assert "原始问题：嗓子疼怎么办" in prompt
+        assert "检索规范化问题：咽痛怎么办" in prompt
 
     def test_kg_results_included(self, builder):
         kg = [{"intent": "疾病简介", "answer": "感冒是上呼吸道感染。"}]

@@ -78,6 +78,21 @@ _ROUTES: list[tuple[list[str], str, bool, bool]] = [
 
 _FALLBACK_QUERY_TYPE = "general_medical_qa"
 
+_ANSWER_STYLE_BY_TYPE = {
+    "disease_fact": "fact_short",
+    "symptom_consult": "symptom_differential",
+    "medication": "medication_safety",
+    "test_report": "test_report",
+    "diet": "diet_guidance",
+    "department": "department_guidance",
+    "general_medical_qa": "general_guidance",
+}
+
+_CASE_CONTEXT_KEYWORDS = [
+    "我", "本人", "我的", "病历", "病例", "报告", "检查单", "化验单",
+    "体检", "复查", "住院", "出院", "既往", "用药", "指标",
+]
+
 # 有效的 query_type 值（规则和 LLM 路由均使用）
 QUERY_TYPES = [
     "disease_fact",
@@ -114,7 +129,7 @@ _ROUTER_SYSTEM = """你是一个医疗问答路由分类器。你的任务是根
 3. 非医疗问题只启用 qa，query_type=general_medical_qa。
 
 请输出以下 JSON 格式（不要加任何其他文字）：
-{{"kg": true/false, "qa": true/false, "query_type": "...", "reason": "一句中文解释"}}"""
+{{"kg": true/false, "qa": true/false, "query_type": "...", "needs_case_context": true/false, "answer_style": "...", "reason": "一句中文解释"}}"""
 
 _ROUTER_USER = """用户问题: {query}
 
@@ -163,9 +178,12 @@ class QueryRouter:
         if use_llm and self.llm is not None:
             result = self._llm_route(query)
             if result is not None:
+                self._enrich_route(result, query)
                 return result
 
-        return self._rule_route(query)
+        route = self._rule_route(query)
+        self._enrich_route(route, query)
+        return route
 
     # ------------------------------------------------------------------
     # LLM 路由
@@ -216,6 +234,8 @@ class QueryRouter:
             "use_toyhom_qa": data.get("qa", data.get("use_toyhom_qa", False)),
             "reason": data.get("reason", ""),
             "query_type": data.get("query_type", ""),
+            "needs_case_context": bool(data.get("needs_case_context", False)),
+            "answer_style": data.get("answer_style", ""),
         }
 
         if canonical["query_type"] not in QUERY_TYPES:
@@ -250,6 +270,20 @@ class QueryRouter:
             "reason": "未匹配到特定规则，默认使用通用问答库",
             "query_type": _FALLBACK_QUERY_TYPE,
         }
+
+    @staticmethod
+    def _enrich_route(route: Dict, query: str) -> None:
+        """补齐下游 prompt / 病例检索需要的路由字段。"""
+        qtype = route.get("query_type") or _FALLBACK_QUERY_TYPE
+        if qtype not in QUERY_TYPES:
+            qtype = _FALLBACK_QUERY_TYPE
+            route["query_type"] = qtype
+        if not route.get("answer_style"):
+            route["answer_style"] = _ANSWER_STYLE_BY_TYPE.get(qtype, "general_guidance")
+        route["needs_case_context"] = bool(
+            route.get("needs_case_context")
+            or any(keyword in query for keyword in _CASE_CONTEXT_KEYWORDS)
+        )
 
 
 # ---------------------------------------------------------------------------

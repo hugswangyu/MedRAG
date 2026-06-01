@@ -60,42 +60,75 @@ def update_job_step(job_id: str, step_key: str, percent: int, status: str = "run
 # ---- JSON 文档索引 ----
 
 
-def get_documents() -> List[DocumentItem]:
+def _read_docs() -> list[dict]:
     docs = _doc_store.read()
+    return docs if isinstance(docs, list) else []
+
+
+def get_documents(username: str | None = None) -> List[DocumentItem]:
+    docs = _read_docs()
+    if username is not None:
+        docs = [d for d in docs if d.get("username", username) == username]
     return [
         DocumentItem(
             filename=d["filename"],
             file_type=d.get("file_type", ""),
             chunk_count=d.get("chunk_count", 0),
+            username=d.get("username", ""),
+            document_id=d.get("document_id", ""),
+            summary=d.get("summary", ""),
+            status=d.get("status", "ready"),
+            uploaded_at=d.get("uploaded_at", ""),
         )
         for d in docs
     ]
 
 
-def add_document(filename: str, file_type: str = "", chunk_count: int = 0) -> None:
-    docs = _doc_store.read()
+def add_document(
+    filename: str,
+    file_type: str = "",
+    chunk_count: int = 0,
+    username: str = "",
+    document_id: str = "",
+    summary: str = "",
+    status: str = "ready",
+) -> None:
+    docs = _read_docs()
     # 去重
-    docs = [d for d in docs if d.get("filename") != filename]
+    docs = [
+        d for d in docs
+        if not (d.get("filename") == filename and d.get("username", "") == username)
+    ]
     docs.append({
         "filename": filename,
         "file_type": file_type,
         "chunk_count": chunk_count,
+        "username": username,
+        "document_id": document_id,
+        "summary": summary,
+        "status": status,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     })
     _doc_store.write(docs)
 
 
-def remove_document(filename: str) -> bool:
-    docs = _doc_store.read()
-    filtered = [d for d in docs if d.get("filename") != filename]
+def remove_document(filename: str, username: str | None = None) -> bool:
+    docs = _read_docs()
+    filtered = [
+        d for d in docs
+        if not (
+            d.get("filename") == filename
+            and (username is None or d.get("username", username) == username)
+        )
+    ]
     if len(filtered) == len(docs):
         return False
     _doc_store.write(filtered)
     return True
 
 
-def get_document_by_filename(filename: str) -> Optional[dict]:
-    for d in _doc_store.read():
-        if d.get("filename") == filename:
+def get_document_by_filename(filename: str, username: str | None = None) -> Optional[dict]:
+    for d in _read_docs():
+        if d.get("filename") == filename and (username is None or d.get("username", username) == username):
             return d
     return None

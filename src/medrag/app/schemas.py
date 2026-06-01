@@ -96,6 +96,11 @@ class DocumentItem(BaseModel):
     filename: str
     file_type: str
     chunk_count: int
+    username: str = ""
+    document_id: str = ""
+    summary: str = ""
+    status: str = "ready"
+    uploaded_at: str = ""
 
 
 class DocumentListResponse(BaseModel):

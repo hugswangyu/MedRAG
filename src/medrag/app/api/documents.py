@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -27,6 +28,7 @@ from ..schemas import (
     UploadResponse,
 )
 from .chat import _executor
+from medrag.data.user_case_store import add_user_case, remove_user_case
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +65,15 @@ def _create_upload_steps():
     ]
 
 
-def _run_upload_job(job_id: str, file_bytes: bytes, original_filename: str):
+def _run_upload_job(job_id: str, file_bytes: bytes, original_filename: str, username: str):
     """在独立线程中执行上传流水线。"""
     loop = asyncio.new_event_loop()
     try:
         _ensure_upload_dir()
-        file_path = os.path.join(_UPLOAD_DIR, f"{job_id}_{original_filename}")
+        user_upload_dir = os.path.join(_UPLOAD_DIR, username)
+        os.makedirs(user_upload_dir, exist_ok=True)
+        file_path = os.path.join(user_upload_dir, f"{job_id}_{original_filename}")
+        document_id = str(uuid.uuid4())
 
         # Step: upload
         update_job_step(job_id, "upload", 50, "running", "正在保存文件...")
@@ -78,7 +83,7 @@ def _run_upload_job(job_id: str, file_bytes: bytes, original_filename: str):
 
         # Step: cleanup
         update_job_step(job_id, "cleanup", 50, "running", "正在检查旧版本...")
-        existing = get_document_by_filename(original_filename)
+        existing = get_document_by_filename(original_filename, username=username)
         if existing:
             update_job_step(job_id, "cleanup", 100, "completed", "已清理旧版本")
         else:
@@ -95,13 +100,22 @@ def _run_upload_job(job_id: str, file_bytes: bytes, original_filename: str):
             return
 
         # 简单分块 (段落级)
-        from medrag.data.text_cleaner import clean_medical_text
+        from medrag.data.text_cleaner import clean_medical_text, desensitize_medical_text
         cleaned = clean_medical_text(raw_text)
-        chunks = _split_text(cleaned)
+        safe_text = desensitize_medical_text(cleaned)
+        chunks = _split_text(safe_text)
         update_job_step(job_id, "parse", 100, "completed", f"解析完成，{len(chunks)} 个文本块")
 
         # Step: parent_store
-        update_job_step(job_id, "parent_store", 100, "completed", f"父级分块 {len(chunks)} 条")
+        summary = _build_case_summary(safe_text)
+        add_user_case(
+            username=username,
+            filename=original_filename,
+            chunks=chunks,
+            summary=summary,
+            document_id=document_id,
+        )
+        update_job_step(job_id, "parent_store", 100, "completed", f"个人病例索引 {len(chunks)} 条")
 
         # Step: vector_store
         update_job_step(job_id, "vector_store", 10, "running", f"正在向量化 {len(chunks)} 个文本块...")
@@ -122,7 +136,6 @@ def _run_upload_job(job_id: str, file_bytes: bytes, original_filename: str):
                 vectors = model.encode(batch)
                 docs = []
                 for j, text in enumerate(batch):
-                    import uuid
                     docs.append({
                         "pk": str(uuid.uuid4()),
                         "department": "",
@@ -145,7 +158,15 @@ def _run_upload_job(job_id: str, file_bytes: bytes, original_filename: str):
             update_job_step(job_id, "vector_store", 100, "completed", f"跳过（向量库不可用：{exc}）")
 
         # 更新索引
-        add_document(original_filename, _infer_file_type(original_filename), len(chunks))
+        add_document(
+            original_filename,
+            _infer_file_type(original_filename),
+            len(chunks),
+            username=username,
+            document_id=document_id,
+            summary=summary,
+            status="ready",
+        )
         update_job(job_id, status="completed", message="病历处理完成")
 
     except Exception as exc:
@@ -174,6 +195,21 @@ def _split_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list:
     return chunks or [text[:chunk_size]]
 
 
+def _build_case_summary(text: str, max_chars: int = 1600) -> str:
+    """生成不依赖 LLM 的病例摘要兜底，供 prompt 优先上下文使用。"""
+    labels = [
+        "主诉", "现病史", "既往史", "检查", "检验", "诊断",
+        "用药", "医嘱", "建议", "异常", "过敏",
+    ]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    picked = [
+        line for line in lines
+        if any(label in line[:20] for label in labels)
+    ]
+    summary = "\n".join(picked[:20]) or text[:max_chars]
+    return summary[:max_chars]
+
+
 @router.post("/upload/async", response_model=UploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
@@ -191,7 +227,7 @@ async def upload_document(
     job_id = create_job(_create_upload_steps())
     update_job(job_id, message=f"正在处理 {file.filename}")
 
-    _executor.submit(_run_upload_job, job_id, file_bytes, file.filename)
+    _executor.submit(_run_upload_job, job_id, file_bytes, file.filename, _current_user.username)
 
     return UploadResponse(job_id=job_id, message=f"已提交上传任务：{file.filename}")
 
@@ -221,7 +257,7 @@ def _create_delete_steps():
     ]
 
 
-def _run_delete_job(job_id: str, filename: str):
+def _run_delete_job(job_id: str, filename: str, username: str):
     """在独立线程中执行删除流水线。"""
     loop = asyncio.new_event_loop()
     try:
@@ -242,13 +278,16 @@ def _run_delete_job(job_id: str, filename: str):
             update_job_step(job_id, "milvus", 100, "completed", f"跳过（Milvus: {exc}）")
 
         update_job_step(job_id, "parent_store", 50, "running", "正在更新索引...")
-        remove_document(filename)
+        remove_document(filename, username=username)
+        remove_user_case(username, filename)
 
         # 清理上传文件
         _ensure_upload_dir()
-        for f in os.listdir(_UPLOAD_DIR):
-            if f.endswith(f"_{filename}"):
-                os.remove(os.path.join(_UPLOAD_DIR, f))
+        user_upload_dir = os.path.join(_UPLOAD_DIR, username)
+        if os.path.isdir(user_upload_dir):
+            for f in os.listdir(user_upload_dir):
+                if f.endswith(f"_{filename}"):
+                    os.remove(os.path.join(user_upload_dir, f))
 
         update_job_step(job_id, "parent_store", 100, "completed", "索引已更新")
         update_job(job_id, status="completed", message=f"已删除病历 {filename}")
@@ -262,14 +301,14 @@ def _run_delete_job(job_id: str, filename: str):
 
 @router.delete("/delete/async/{filename}", response_model=DeleteResponse)
 async def delete_document(filename: str, _current_user=Depends(get_current_user)):
-    existing = get_document_by_filename(filename)
+    existing = get_document_by_filename(filename, username=_current_user.username)
     # 即使文档不在索引中也允许删除（清理脏数据）
 
     job_id = create_job(_create_delete_steps())
     update_job(job_id, message=f"正在删除 {filename}")
     update_job_step(job_id, "prepare", 1, "running", "正在提交删除任务")
 
-    _executor.submit(_run_delete_job, job_id, filename)
+    _executor.submit(_run_delete_job, job_id, filename, _current_user.username)
 
     return DeleteResponse(job_id=job_id, message=f"已提交删除任务：{filename}")
 
@@ -292,4 +331,4 @@ async def get_delete_job(job_id: str, _current_user=Depends(get_current_user)):
 
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(_current_user=Depends(get_current_user)):
-    return DocumentListResponse(documents=get_documents())
+    return DocumentListResponse(documents=get_documents(username=_current_user.username))

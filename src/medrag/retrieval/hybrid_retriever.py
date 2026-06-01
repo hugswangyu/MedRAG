@@ -15,7 +15,7 @@
 | 两者都不开           | 不检索          | —           | —                 |
 +---------------------+---------------+-------------+------------------+
 
-病例上下文不参与上述任何流程，作为独立的优先上下文通道直通 PromptBuilder。
+病例上下文作为个人隔离检索源，仅在路由判定需要时按 username 查询。
 """
 
 from __future__ import annotations
@@ -89,10 +89,12 @@ class HybridRetriever:
         # result["all_results"] → 根据路由决策处理后的结果列表
     """
 
-    def __init__(self, kg_retriever, toyhom_retriever, router):
+    def __init__(self, kg_retriever, toyhom_retriever, router, case_retriever=None, normalizer=None):
         self.kg = kg_retriever
         self.toyhom = toyhom_retriever
         self.router = router
+        self.case_retriever = case_retriever
+        self.normalizer = normalizer
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -103,6 +105,7 @@ class HybridRetriever:
         query: str,
         top_k: int = 5,
         department: str | None = None,
+        username: str | None = None,
     ) -> Dict:
         """路由 *query* 并从合适的源获取结果。
 
@@ -120,29 +123,42 @@ class HybridRetriever:
             字典，键为：route、kg_results、toyhom_results、all_results、
             ``fusion_mode``（"rrf" / "single" / "none"）。
         """
-        route = self.router.route(query)
+        query_info = None
+        retrieval_query = query
+        if self.normalizer is not None:
+            query_info = self.normalizer.normalize(query).to_dict()
+            retrieval_query = query_info["normalized_query"]
+
+        route = self.router.route(retrieval_query)
 
         use_kg = route["use_kg"]
         use_qa = route["use_toyhom_qa"]
+        use_case = bool(route.get("needs_case_context")) and self.case_retriever is not None
 
         # 两者都不开 → 直接返回
-        if not use_kg and not use_qa:
+        if not use_kg and not use_qa and not use_case:
             return {
                 "route": route,
+                "query_info": query_info,
                 "kg_results": [],
                 "toyhom_results": [],
+                "case_results": [],
                 "all_results": [],
                 "fusion_mode": "none",
             }
 
         kg_results, toyhom_results = self._run_retrieval(
-            query, use_kg, use_qa, top_k, department,
+            retrieval_query, use_kg, use_qa, top_k, department,
+        )
+        case_results = (
+            self._safe_case_search(retrieval_query, username, top_k)
+            if use_case else []
         )
 
         # 根据实际命中源的数量选择融合策略
-        both_hit = bool(kg_results) and bool(toyhom_results)
-        if both_hit:
-            all_results = _rrf_fuse(kg_results, toyhom_results)
+        source_count = sum(bool(items) for items in (kg_results, toyhom_results, case_results))
+        if source_count >= 2:
+            all_results = _rrf_fuse(_rrf_fuse(kg_results, toyhom_results), case_results)
             fusion_mode = "rrf"
         elif kg_results:
             all_results = _tag_single_source(kg_results, "kg")
@@ -150,14 +166,19 @@ class HybridRetriever:
         elif toyhom_results:
             all_results = _tag_single_source(toyhom_results, "toyhom")
             fusion_mode = "single"
+        elif case_results:
+            all_results = _tag_single_source(case_results, "user_case")
+            fusion_mode = "single"
         else:
             all_results = []
             fusion_mode = "none"
 
         return {
             "route": route,
+            "query_info": query_info,
             "kg_results": kg_results,
             "toyhom_results": toyhom_results,
+            "case_results": case_results,
             "all_results": all_results,
             "fusion_mode": fusion_mode,
         }
@@ -230,4 +251,13 @@ class HybridRetriever:
             return self.toyhom.search(query, top_k=top_k, department=department)
         except Exception:
             logger.warning("Toyhom retrieval failed", exc_info=True)
+            return []
+
+    def _safe_case_search(
+        self, query: str, username: str | None, top_k: int,
+    ) -> List[Dict]:
+        try:
+            return self.case_retriever.search(query, username=username, top_k=top_k)
+        except Exception:
+            logger.warning("User case retrieval failed", exc_info=True)
             return []

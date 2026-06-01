@@ -14,9 +14,11 @@ from medrag.rag import PromptBuilder, AnswerGenerator, SafetyGuard
 from medrag.retrieval import (
     HybridRetriever,
     KGRetriever,
+    QueryNormalizer,
     QueryRouter,
     get_reranker,
 )
+from medrag.data.user_case_store import UserCaseRetriever, get_combined_case_summary
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,8 @@ class MedicalChatService:
         prompt_builder=None,        # PromptBuilder 或 None → 自动创建
         answer_generator=None,      # AnswerGenerator 或 None → 自动创建
         safety_guard=None,          # SafetyGuard 或 None → 自动创建
+        case_retriever=None,        # UserCaseRetriever 或 None → 自动创建
+        normalizer=None,            # QueryNormalizer 或 None → 自动创建
     ):
         # ---- 共享 LLM 客户端 ----
         _llm_client = get_llm_client()
@@ -75,6 +79,8 @@ class MedicalChatService:
                 kg_retriever=kg_retriever,
                 toyhom_retriever=_toyhom,
                 router=_router,
+                case_retriever=case_retriever or UserCaseRetriever(),
+                normalizer=normalizer or QueryNormalizer(),
             )
 
         # ---- 生成流水线 ----
@@ -91,6 +97,7 @@ class MedicalChatService:
         self,
         query: str,
         user_case_summary: Optional[str] = None,
+        username: Optional[str] = None,
     ) -> Dict:
         """运行完整的医疗问答流水线。
 
@@ -106,7 +113,7 @@ class MedicalChatService:
         risk_info = self.safety_guard.detect_risk(query)
 
         # 2. 多源检索
-        retrieval = self.hybrid_retriever.retrieve(query)
+        retrieval = self.hybrid_retriever.retrieve(query, username=username)
 
         # 3. 重排序
         reranked = self.reranker.rerank(
@@ -119,20 +126,26 @@ class MedicalChatService:
         retrieval_quality = {
             "has_kg": bool(retrieval["kg_results"]),
             "has_qa": bool(retrieval["toyhom_results"]),
+            "has_case": bool(retrieval.get("case_results")),
             "confidence": (
-                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"])
+                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"] or retrieval.get("case_results"))
                 else "none"
             ),
         }
 
         # 5. 构建提示词
+        if user_case_summary is None and username:
+            user_case_summary = get_combined_case_summary(username)
+
         prompt = self.prompt_builder.build_answer_prompt(
             query=query,
             kg_results=retrieval["kg_results"],
             toyhom_results=retrieval["toyhom_results"],
+            case_results=retrieval.get("case_results", []),
             case_context=user_case_summary,
             route=retrieval["route"],
             retrieval_quality=retrieval_quality,
+            query_info=retrieval.get("query_info"),
         )
 
         # 6. 生成回答
@@ -148,14 +161,17 @@ class MedicalChatService:
             "route": retrieval["route"],
             "kg_results": retrieval["kg_results"],
             "toyhom_results": retrieval["toyhom_results"],
+            "case_results": retrieval.get("case_results", []),
             "reranked_results": reranked,
             "risk_info": risk_info,
+            "query_info": retrieval.get("query_info"),
         }
 
     def stream_chat(
         self,
         query: str,
         user_case_summary: Optional[str] = None,
+        username: Optional[str] = None,
         department: Optional[str] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
@@ -192,7 +208,7 @@ class MedicalChatService:
             "type": "rag_step",
             "step": {"key": "retrieve", "label": "多源检索", "icon": "🔍", "detail": "知识图谱 + 向量库"},
         }
-        retrieval = self.hybrid_retriever.retrieve(query, department=department)
+        retrieval = self.hybrid_retriever.retrieve(query, department=department, username=username)
 
         # 3. 重排序
         yield {
@@ -209,8 +225,9 @@ class MedicalChatService:
         retrieval_quality = {
             "has_kg": bool(retrieval["kg_results"]),
             "has_qa": bool(retrieval["toyhom_results"]),
+            "has_case": bool(retrieval.get("case_results")),
             "confidence": (
-                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"])
+                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"] or retrieval.get("case_results"))
                 else "none"
             ),
         }
@@ -220,13 +237,18 @@ class MedicalChatService:
             "type": "rag_step",
             "step": {"key": "prompt", "label": "构建提示词", "icon": "📝"},
         }
+        if user_case_summary is None and username:
+            user_case_summary = get_combined_case_summary(username)
+
         prompt = self.prompt_builder.build_answer_prompt(
             query=query,
             kg_results=retrieval["kg_results"],
             toyhom_results=retrieval["toyhom_results"],
+            case_results=retrieval.get("case_results", []),
             case_context=user_case_summary,
             route=retrieval["route"],
             retrieval_quality=retrieval_quality,
+            query_info=retrieval.get("query_info"),
         )
 
         # 5. 发送检索溯源信息
@@ -235,6 +257,7 @@ class MedicalChatService:
             "tool_name": "multi-source-retrieval",
             "retrieval_stage": "initial",
             "retrieval_mode": retrieval["route"].get("query_type", ""),
+            "query_info": retrieval.get("query_info"),
             "initial_retrieved_chunks": [
                 {
                     "filename": r.get("source", r.get("id", "")),

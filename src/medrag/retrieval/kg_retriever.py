@@ -13,12 +13,18 @@ from __future__ import annotations
 import random
 from typing import Dict, List, Optional
 
-import py2neo
+try:
+    import py2neo
+except Exception:  # pragma: no cover - optional Neo4j dependency
+    py2neo = None  # type: ignore[assignment]
 
 from medrag.config.settings import settings
 from medrag.llm import get_llm_client
 from medrag.retrieval.intent import recognize_intents
-from medrag.ner import model as zwk
+try:
+    from medrag.ner import model as zwk
+except Exception:  # pragma: no cover - optional NER runtime dependency
+    zwk = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # 意图 → Cypher 映射
@@ -98,6 +104,8 @@ class KGRetriever:
 
     @staticmethod
     def _create_neo4j_client() -> py2neo.Graph:
+        if py2neo is None:
+            raise RuntimeError("py2neo is required for KGRetriever")
         return py2neo.Graph(
             settings.neo4j_uri,
             user=settings.neo4j_user,
@@ -108,6 +116,8 @@ class KGRetriever:
     def _get_entities(self, query: str) -> Dict[str, str]:
         """NER 流水线: {entity_type: canonical_name}。"""
         try:
+            if zwk is None:
+                return {}
             return zwk.get_ner_result(
                 self.bert_model,
                 self.bert_tokenizer,

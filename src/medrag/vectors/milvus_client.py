@@ -5,15 +5,26 @@ from __future__ import annotations
 import logging
 from typing import Dict, List
 
-from pymilvus import (
-    Collection,
-    CollectionSchema,
-    DataType,
-    FieldSchema,
-    connections,
-    utility,
-)
-from pymilvus.exceptions import MilvusException
+try:
+    from pymilvus import (
+        Collection,
+        CollectionSchema,
+        DataType,
+        FieldSchema,
+        connections,
+        utility,
+    )
+    from pymilvus.exceptions import MilvusException
+except Exception:  # pragma: no cover - optional runtime dependency
+    Collection = None  # type: ignore[assignment]
+    CollectionSchema = None  # type: ignore[assignment]
+    DataType = None  # type: ignore[assignment]
+    FieldSchema = None  # type: ignore[assignment]
+    connections = None  # type: ignore[assignment]
+    utility = None  # type: ignore[assignment]
+
+    class MilvusException(Exception):
+        pass
 
 
 logger = logging.getLogger(__name__)
@@ -108,9 +119,12 @@ class MilvusClientWrapper:
 
         rows = []
         for doc, embedding in zip(docs, embeddings):
+            pk = doc.get("id") or doc.get("pk")
+            if pk is None:
+                raise ValueError("each doc must include either 'id' or 'pk'")
             rows.append(
                 {
-                    "pk": self._clip(str(doc["id"]), "pk"),
+                    "pk": self._clip(str(pk), "pk"),
                     "department": self._clip(doc.get("department", ""), "department"),
                     "title": self._clip(doc.get("title", ""), "title"),
                     "question": self._clip(doc.get("question", ""), "question"),

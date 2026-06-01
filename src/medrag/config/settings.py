@@ -133,6 +133,9 @@ class Settings:
     documents_index_path: Path = _env_path(
         "DOCUMENTS_INDEX_PATH", str(BASE_DIR.parent / "tmp_data" / "documents.json")
     )
+    user_cases_index_path: Path = _env_path(
+        "USER_CASES_INDEX_PATH", str(BASE_DIR.parent / "tmp_data" / "user_cases.json")
+    )
     credentials_path: Path = _env_path(
         "CREDENTIALS_PATH", str(BASE_DIR.parent / "tmp_data" / "user_credentials.json")
     )
