@@ -159,7 +159,7 @@ class MedicalChatService:
         if mode == "chat":
             return self._handle_chat(query, route)
         elif mode == "react":
-            return self._handle_react_stub(query, route)
+            return self._handle_react(query, route)
         else:  # "rag"（默认）
             return self._handle_rag(query, route, user_case_summary, username)
 
@@ -190,7 +190,7 @@ class MedicalChatService:
         if mode == "chat":
             yield from self._stream_chat(query, route, provider, model)
         elif mode == "react":
-            yield from self._stream_react_stub(query, route)
+            yield from self._stream_react(query, route)
         else:
             yield from self._stream_rag(
                 query, route, user_case_summary, username,
@@ -306,34 +306,126 @@ class MedicalChatService:
         yield {"type": "content", "content": result}
 
     # ------------------------------------------------------------------
-    # ReAct stub
+    # ReAct 多步推理
     # ------------------------------------------------------------------
 
-    def _handle_react_stub(self, query: str, route: dict) -> Dict:
-        """ReAct stub：提示尚未启用。"""
-        answer = "复杂推理模式正在开发中，请使用其他方式查询。"
-        self.memory.add_message("user", query)
-        self.memory.add_message("assistant", answer)
+    def _handle_react(self, query: str, route: dict) -> Dict:
+        """ReAct 模式：多步推理循环（Thought/Action/Observation）。"""
+        risk_info = self.safety_guard.detect_risk(query)
+
+        provider = get_llm_provider()
+        from medrag.react import ReActEngine
+
+        engine = ReActEngine(provider.client, model=provider.default_model)
+
+        # ── 注册检索工具 ──
+        kg = getattr(self.hybrid_retriever, 'kg', None)
+        if kg is not None:
+            engine.register_tool(
+                "retrieve_kg", "查询医学知识图谱，获取疾病、症状、药物间的结构化关系",
+                executor=kg.search,
+                parameters=[{"name": "query", "description": "搜索关键词", "type": "string"}],
+            )
+        engine.register_tool(
+            "retrieve_qa", "检索医疗问答库和知识图谱，查找类似病例和医学知识",
+            executor=self._react_qa_search,
+            parameters=[{"name": "query", "description": "搜索关键词", "type": "string"}],
+        )
+
+        # ── 注册计算工具 ──
+        from medrag.tools.dosage_calculator import DosageCalculator
+        _dosage = DosageCalculator()
+        engine.register_tool(
+            "calculate_dosage", "计算常见药物剂量，支持成人和儿童剂量换算",
+            executor=lambda **kw: _dosage.execute(**kw),
+            parameters=[
+                {"name": "drug_name", "description": "药物名称（中文）", "type": "string"},
+                {"name": "age", "description": "患者年龄（岁）", "type": "number"},
+                {"name": "weight", "description": "患者体重（kg，可选）", "type": "number"},
+            ],
+        )
+        from medrag.tools.normal_range import NormalRangeTool
+        _normal = NormalRangeTool()
+        engine.register_tool(
+            "query_normal_range", "查询医学检查项目的正常值参考范围，可判断检查值是否正常",
+            executor=lambda **kw: _normal.execute(**kw),
+            parameters=[
+                {"name": "test_name", "description": "检查项目名称（中文）", "type": "string"},
+                {"name": "value", "description": "检查值（可选，传入则判断是否正常）", "type": "string"},
+            ],
+        )
+
+        # ── 记忆上下文 ──
+        query_emb = self._get_query_embedding(query)
+        mem_context = self.memory.build_context(query, query_embedding=query_emb)
+
+        # ── 执行 ReAct 循环 ──
+        result = engine.run(query, system_context=mem_context)
+
+        # ── 记录记忆 ──
+        if query_emb is not None:
+            self.memory.add_message_with_embedding("user", query, query_emb)
+        else:
+            self.memory.add_message("user", query)
+        self.memory.store_assistant_reply(result["answer"])
+
         return {
-            "answer": answer,
+            "answer": result["answer"],
             "route": {**route, "execution_mode": "react"},
             "kg_results": [],
             "qa_results": [],
             "case_results": [],
             "qa_source_details": {},
-            "risk_info": {"has_risk": False, "risk_keywords": []},
+            "risk_info": risk_info,
             "query_info": None,
+            "react_trace": {
+                "steps": result.get("steps", []),
+                "tool_results": result.get("tool_results", {}),
+            },
         }
 
-    def _stream_react_stub(self, query: str, route: dict) -> Generator[Dict, None, None]:
+    def _react_qa_search(self, query: str) -> str:
+        """ReAct QA/知识库检索辅助。"""
+        try:
+            retrieval = self.hybrid_retriever.retrieve(query)
+            kg = retrieval.get("kg_results", [])
+            qa = retrieval.get("qa_results", [])
+            parts = []
+            if kg:
+                parts.append("【知识图谱结果】")
+                for r in kg[:3]:
+                    parts.append(f"- {r.get('answer', '')[:400]}")
+            if qa:
+                parts.append("【相似问答结果】")
+                for r in qa[:3]:
+                    ans = r.get('answer') or r.get('text', '')
+                    parts.append(f"- {ans[:400]}")
+            return "\n".join(parts) if parts else "未找到相关信息"
+        except Exception as exc:
+            logger.warning("ReAct QA search failed: %s", exc)
+            return f"检索出错：{exc}"
+
+    def _stream_react(self, query: str, route: dict) -> Generator[Dict, None, None]:
+        """流式 ReAct 模式：逐步产出推理步骤，最后流式输出答案。"""
         yield {
             "type": "rag_step",
-            "step": {"key": "react", "label": "复杂推理", "icon": "🧠", "detail": "模式尚未启用"},
+            "step": {"key": "react", "label": "ReAct 推理", "icon": "🧠", "detail": "多步推理"},
         }
-        answer = "复杂推理模式正在开发中，请使用其他方式查询。"
-        self.memory.add_message("user", query)
-        self.memory.add_message("assistant", answer)
-        yield {"type": "content", "content": answer}
+        result = self._handle_react(query, route)
+
+        # 产出推理轨迹
+        for step in result.get("react_trace", {}).get("steps", []):
+            yield {
+                "type": "rag_step",
+                "step": {
+                    "key": f"react_step_{step['step']}",
+                    "label": f"步骤 {step['step']}",
+                    "icon": "🔍",
+                    "detail": f"{step['action']}: {step['thought'][:80]}",
+                },
+            }
+
+        yield {"type": "content", "content": result["answer"]}
 
     # ------------------------------------------------------------------
     # RAG 模式（原有完整流水线）

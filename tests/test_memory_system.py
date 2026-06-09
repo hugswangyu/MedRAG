@@ -409,10 +409,21 @@ class TestChatServiceMemoryIntegration:
             user_text = call_kwargs[1]["content"]
             assert "青霉素" in user_text
 
-    def test_react_stub_records_memory(self, service):
-        """ReAct stub：应当记录消息。"""
-        result = service._handle_react_stub("帮我分析", {"execution_mode": "react"})
-        assert service.memory.stats["stm_count"] == 2
+    def test_react_handler_returns_answer(self, service):
+        """ReAct 模式：engine 执行返回 answer 结构。"""
+        with patch.object(service.answer_generator, "generate") as mock_gen:
+            mock_gen.return_value = "分析结果"
+            from medrag.llm.provider import get_llm_provider
+            prov = get_llm_provider()
+            with patch.object(prov.client.chat.completions, "create") as mock_llm:
+                mock_response = type('obj', (object,), {
+                    'choices': [type('obj', (object,), {'message': type('obj', (object,), {'content': '最终答案：分析结果'})})()]
+                })
+                mock_llm.return_value = mock_response
+                result = service._handle_react("帮我分析", {"execution_mode": "react"})
+                assert "answer" in result
+                assert "react_trace" in result
+                assert service.memory.stats["stm_count"] >= 2
 
     def test_stream_chat_records_memory(self, service):
         """流式 Chat：流结束后应当记录记忆。"""

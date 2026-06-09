@@ -96,6 +96,15 @@ _CASE_CONTEXT_KEYWORDS = [
 # 执行模式（规则和 LLM 路由均使用）
 EXECUTION_MODES = ["chat", "tool", "rag", "react"]
 
+# ReAct 关键词（→ 多步推理）
+_REACT_KEYWORDS = [
+    "区别", "对比", "比较", "有什么不同",
+    "同时", "又", "先", "后", "步骤",
+    "到底", "究竟",
+    "如果...怎么办", "是不是...还是",
+    "综合分析", "全面分析",
+]
+
 # 问候/闲聊关键词（→ Chat 模式）
 _GREETING_KEYWORDS = [
     "你好", "您好", "嗨", "hi", "hello", "hey",
@@ -284,6 +293,15 @@ class QueryRouter:
                 "execution_mode": "chat",
                 "use_kg": False, "use_qa": False,
                 "reason": "检测到问候/闲聊关键词，进入 Chat 模式",
+                "query_type": _FALLBACK_QUERY_TYPE,
+            }
+
+        # ReAct 检测 → 多步推理模式
+        if _re.search("|".join(_REACT_KEYWORDS), query, _re.IGNORECASE):
+            return {
+                "execution_mode": "react",
+                "use_kg": True, "use_qa": True,
+                "reason": "检测到多步推理关键词，进入 ReAct 模式",
                 "query_type": _FALLBACK_QUERY_TYPE,
             }
 
