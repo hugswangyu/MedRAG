@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-RRF_C = 20
+RRF_C = 60
 
 
 def _rrf_fuse(
