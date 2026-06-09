@@ -15,6 +15,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -23,7 +24,11 @@ from .classifier import classify_memory_content, get_importance
 from .graph_memory import GraphMemory
 from .long_term import LongTermMemory
 from .preference import PreferenceStore
-from .schema import ContextAssembler, Slot, estimate_tokens
+from .schema import (
+    ContextAssembler, Slot, estimate_tokens,
+    PRIORITY_MEMORY, PRIORITY_CASE_SUMMARY, PRIORITY_KG,
+    PRIORITY_QA, PRIORITY_CASE_CHUNKS, PRIORITY_QUERY,
+)
 from .short_term import ConversationMessage, ShortTermMemory
 from .types import ConsolidationConfig, ConsolidationResult, MemoryItem, RecallFilter
 
@@ -47,10 +52,11 @@ class MemorySystem:
         consolidation: Optional[ConsolidationConfig] = None,
         kg_store=None,
         persist_path: Optional[str] = None,
+        username: str = "",
     ):
         self.short_term = ShortTermMemory(max_turns=max_turns)
-        self.preferences = PreferenceStore()
-        self.long_term = LongTermMemory(persist_path=persist_path)
+        self.preferences = PreferenceStore(username=username)
+        self.long_term = LongTermMemory(username=username)
         self._consolidation_cfg = consolidation or ConsolidationConfig()
         self.long_term.set_consolidation_config(self._consolidation_cfg)
         self.graph = GraphMemory(self.long_term, kg_store=kg_store)
@@ -73,8 +79,15 @@ class MemorySystem:
         self._msg_count += 1
 
         if role == "user":
-            # ── Rule-based preference extraction (sync) ──
+            # ── Rule-based preference extraction (sync, instant) ──
             self.preferences.extract_and_save(content)
+
+            # ── LLM-based preference extraction (async, non-blocking) ──
+            threading.Thread(
+                target=self.preferences.llm_extract,
+                args=(content,),
+                daemon=True,
+            ).start()
 
             # ── Store classifiable content as long-term memory ──
             cat, tags, hint = classify_memory_content(content)
@@ -152,23 +165,23 @@ class MemorySystem:
 
     def build_context(self, query: str,
                       query_embedding: Optional[np.ndarray] = None,
-                      include_stm: bool = True) -> str:
-        """Build a formatted memory context string for LLM system prompt injection.
+                      include_stm: bool = True,
+                      budget: int = 4096) -> str:
+        """Build a formatted memory context string using priority-based ContextAssembler.
 
-        Sections:
+        Sections (all at PRIORITY_MEMORY level — compete equally under budget):
           1. User preferences (from PreferenceStore.build_context)
           2. Long-term memory recall (from recall)
           3. Short-term memory (recent conversation history)
 
         Mirrors AGI-saber buildContextPrefix via runtime.ContextAssembler.
-        For Phase 1, this is a simplified single-block version.
         """
-        parts: List[str] = []
+        assembler = ContextAssembler(budget=budget)
 
         # 1. Preferences
         pref_text = self.preferences.build_context()
         if pref_text:
-            parts.append(pref_text)
+            assembler.add("preferences", pref_text, priority=PRIORITY_MEMORY)
 
         # 2. Long-term recall
         ltm_results = self.recall(query, query_embedding, top_k=5)
@@ -176,7 +189,8 @@ class MemorySystem:
             mem_lines = ["【长期记忆】"]
             for item in ltm_results:
                 mem_lines.append(f"- {item.content}")
-            parts.append("\n".join(mem_lines))
+            assembler.add("long_term", "\n".join(mem_lines),
+                          priority=PRIORITY_MEMORY)
 
         # 3. Short-term history
         if include_stm and len(self.short_term) > 0:
@@ -187,9 +201,10 @@ class MemorySystem:
                     prefix = "用户" if m["role"] == "user" else "助手"
                     text = m["content"][:200]
                     stm_lines.append(f"{prefix}: {text}")
-                parts.append("\n".join(stm_lines))
+                assembler.add("short_term", "\n".join(stm_lines),
+                              priority=PRIORITY_MEMORY)
 
-        return "\n\n".join(parts)
+        return assembler.assemble()
 
     # ------------------------------------------------------------------
     # Consolidation
@@ -219,18 +234,12 @@ class MemorySystem:
 
     def clear(self) -> None:
         """Clear all memory layers."""
-        persist_path = self.long_term._persist_path
-        # Delete persistence file so new LTM starts empty
-        if persist_path and persist_path.exists():
-            try:
-                persist_path.unlink()
-            except Exception:
-                pass
+        username = self.long_term._username
         self.short_term.clear()
-        self.long_term = LongTermMemory(persist_path=str(persist_path) if persist_path else None)
+        self.long_term = LongTermMemory(username=username)
         self.long_term.set_consolidation_config(self._consolidation_cfg)
         self.graph = GraphMemory(self.long_term)
-        self.preferences = PreferenceStore()
+        self.preferences = PreferenceStore(username=username)
         self._msg_count = 0
 
     @property

@@ -103,10 +103,12 @@ async def chat_stream(
                     collected_content += event["content"]
         finally:
             yield "data: [DONE]\n\n"
-            # 存入会话
+            # 存入会话（带用户归属）
             try:
-                add_message(body.session_id, "human", body.message)
-                add_message(body.session_id, "ai", collected_content)
+                add_message(body.session_id, "human", body.message,
+                            username=current_user.username)
+                add_message(body.session_id, "ai", collected_content,
+                            username=current_user.username)
             except Exception:
                 logger.warning("保存会话消息失败", exc_info=True)
 

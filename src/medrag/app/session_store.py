@@ -1,4 +1,4 @@
-"""会话持久化：JSON 文件存储。"""
+"""会话持久化：PostgreSQL 存储，支持按用户隔离。"""
 
 from __future__ import annotations
 
@@ -6,18 +6,23 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from medrag.config.settings import settings
-from medrag.infrastructure.storage import JsonStore
+from medrag.infrastructure.storage.postgres_client import (
+    session_save as _pg_session_save,
+    session_update as _pg_session_update,
+    session_list as _pg_session_list,
+    session_get as _pg_session_get,
+    session_delete as _pg_session_delete,
+    message_add as _pg_message_add,
+    message_list as _pg_message_list,
+)
 
 from .schemas import SessionSummary, SessionMessage, SessionDetailResponse
 
 logger = logging.getLogger(__name__)
 
-_store = JsonStore(str(settings.sessions_path))
-
 
 # ---------------------------------------------------------------------------
-# 公开 API
+# 公开 API（多一层封装，保持调用方不变）
 # ---------------------------------------------------------------------------
 
 
@@ -26,46 +31,48 @@ def add_message(
     msg_type: str,
     content: str,
     rag_trace: Optional[dict] = None,
+    username: str = "",
 ) -> None:
     """向会话追加一条消息。"""
-    sessions = _store.read()
-    entry = {
-        "type": msg_type,
-        "content": content,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    if rag_trace:
-        entry["rag_trace"] = rag_trace
-    sessions.setdefault(session_id, []).append(entry)
-    _store.write(sessions)
+    # Ensure session exists
+    existing = _pg_session_get(session_id)
+    if existing is None:
+        _pg_session_save(session_id, username)
+        msg_count = 1
+    else:
+        msg_count = existing.get("message_count", 0) + 1
+
+    _pg_message_add(session_id, msg_type, content, rag_trace)
+    _pg_session_update(session_id, msg_count)
 
 
-def get_sessions() -> List[SessionSummary]:
-    sessions = _store.read()
+def get_sessions(username: str = "") -> List[SessionSummary]:
+    rows = _pg_session_list(username)
     result = []
-    for sid, msgs in sessions.items():
-        updated = msgs[-1]["timestamp"] if msgs else ""
+    for r in rows:
+        updated = r.get("updated_at", "")
+        if hasattr(updated, "isoformat"):
+            updated = updated.isoformat()
         result.append(
             SessionSummary(
-                session_id=sid,
-                message_count=len(msgs),
-                updated_at=updated,
+                session_id=r["session_id"],
+                message_count=r.get("message_count", 0),
+                updated_at=str(updated),
             )
         )
-    result.sort(key=lambda s: s.updated_at, reverse=True)
     return result
 
 
 def get_session(session_id: str) -> Optional[SessionDetailResponse]:
-    sessions = _store.read()
-    msgs = sessions.get(session_id)
-    if msgs is None:
+    rows = _pg_session_get(session_id)
+    if rows is None:
         return None
+    msgs = _pg_message_list(session_id)
     return SessionDetailResponse(
         session_id=session_id,
         messages=[
             SessionMessage(
-                type=m["type"],
+                type=m["msg_type"],
                 content=m["content"],
                 rag_trace=m.get("rag_trace"),
             )
@@ -75,9 +82,8 @@ def get_session(session_id: str) -> Optional[SessionDetailResponse]:
 
 
 def delete_session(session_id: str) -> bool:
-    sessions = _store.read()
-    if session_id not in sessions:
+    existing = _pg_session_get(session_id)
+    if existing is None:
         return False
-    del sessions[session_id]
-    _store.write(sessions)
+    _pg_session_delete(session_id)
     return True

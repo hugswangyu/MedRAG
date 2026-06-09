@@ -49,6 +49,13 @@ def _env_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Settings:
+    # PostgreSQL
+    pg_host: str = _env_str("PG_HOST", "localhost")
+    pg_port: int = _env_int("PG_PORT", 5432)
+    pg_user: str = _env_str("PG_USER", "ragqa")
+    pg_password: str = _env_str("PG_PASSWORD", "ragqa123")
+    pg_database: str = _env_str("PG_DATABASE", "ragqa_memory")
+
     # Neo4j
     neo4j_uri: str = _env_str("NEO4J_URI", "http://localhost:7474")
     neo4j_user: str = _env_str("NEO4J_USER", "neo4j")

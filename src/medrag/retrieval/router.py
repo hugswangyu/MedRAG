@@ -19,6 +19,21 @@ from medrag.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# 专用 DeepSeek 客户端（与 intent.py 模式一致）
+_router_client = None
+
+
+def _get_router_client():
+    global _router_client
+    if _router_client is None:
+        from openai import OpenAI
+        _router_client = OpenAI(
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+        )
+    return _router_client
+
+
 # ---------------------------------------------------------------------------
 # 规则路由表（回退模式 & 无 LLM 客户端模式）
 # ---------------------------------------------------------------------------
@@ -169,20 +184,17 @@ JSON:"""
 
 
 class QueryRouter:
-    """混合路由器：LLM 优先，附带规则回退。
+    """混合路由器：LLM 优先（专用 DeepSeek），附带规则回退。
 
     用法::
 
-        from openai import OpenAI
-        llm = OpenAI(api_key=..., base_url=...)
-
-        router = QueryRouter(llm_client=llm)
+        router = QueryRouter()
         decision = router.route("感冒了怎么办")
 
         # 强制规则模式:
         decision = router.route("...", use_llm=False)
 
-        # 无 LLM 客户端 → 自动仅用规则:
+        # 无 DeepSeek API Key → 自动仅用规则:
         router = QueryRouter()
         decision = router.route("...")
     """
@@ -190,7 +202,7 @@ class QueryRouter:
     def __init__(self, llm_client=None):
         """
         Args:
-            llm_client: 兼容 OpenAI 的客户端。若为 None，则始终使用规则。
+            llm_client: 已废弃，保留仅用于向后兼容。LLM 路由始终使用专用 DeepSeek 客户端。
         """
         self.llm = llm_client
 
@@ -203,7 +215,7 @@ class QueryRouter:
 
         返回字典，键为：use_kg、use_qa、reason、query_type。
         """
-        if use_llm and self.llm is not None:
+        if use_llm and settings.deepseek_api_key:
             result = self._llm_route(query)
             if result is not None:
                 self._enrich_route(result, query)
@@ -220,8 +232,9 @@ class QueryRouter:
     def _llm_route(self, query: str) -> Optional[Dict]:
         """尝试基于 LLM 的路由。任何失败均返回 None。"""
         try:
-            response = self.llm.chat.completions.create(
-                model=settings.deepseek_default_model,
+            client = _get_router_client()
+            response = client.chat.completions.create(
+                model=settings.deepseek_intent_model,
                 messages=[
                     {"role": "system", "content": _ROUTER_SYSTEM},
                     {"role": "user",

@@ -8,17 +8,18 @@ Key design:
   - FilterByCategory: stable category enumeration (no scoring).
   - Consolidate: decay → dedup+merge → expire, all in-place on self._items.
   - TF-IDF fallback: when no embedding provided, tokenize by Chinese chars + English words.
-  - Persistence: optional JSON auto-save/load via ``persist_path``.
+  - Persistence: PostgreSQL-backed via postgres_client (``username`` for multi-tenant isolation).
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import math
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -83,26 +84,28 @@ def _merge_tags(a: List[str], b: List[str]) -> List[str]:
 class LongTermMemory:
     """Embedding-based semantic recall with TF-IDF fallback and automatic consolidation.
 
+    Replaces JSON file persistence with PostgreSQL.
+    Supports optional ``username`` for multi-tenant isolation.
+
     Usage::
 
-        ltm = LongTermMemory()
+        ltm = LongTermMemory(username="alice")
         ltm.set_consolidation_config(ConsolidationConfig(...))
         ltm.store_classified("患者对青霉素过敏", 0.9, embedding, "fact", ["medical"])
         results = ltm.recall_by_filter("过敏", query_embedding=emb)
     """
 
-    def __init__(self, persist_path: Optional[str] = None):
+    def __init__(self, username: str = "", persist_path: Optional[str] = None):
+        self._username = username
         self._items: List[MemoryItem] = []
         self._vocab_id: Dict[str, int] = {}      # token → index
         self._vocab: List[str] = []               # index → token
         self._next_id: int = 0
         self._store_count: int = 0
         self._consolidation_cfg: Optional[ConsolidationConfig] = None
-        self._persist_path: Optional[Path] = Path(persist_path) if persist_path else None
 
-        # ── Auto-load from disk ──
-        if self._persist_path and self._persist_path.exists():
-            self.load()
+        # ── Auto-load from PostgreSQL ──
+        self._load_from_pg()
 
     # ------------------------------------------------------------------
     # Config
@@ -420,6 +423,9 @@ class LongTermMemory:
         self._items = [item for i, item in enumerate(self._items) if i not in removed]
         self._rebuild_vocab()
 
+        # ── Sync to PostgreSQL ──
+        self._sync_consolidation_to_pg(result)
+
         return result
 
     def _item_similarity(self, a: MemoryItem, b: MemoryItem) -> float:
@@ -482,41 +488,112 @@ class LongTermMemory:
         return merged
 
     # ------------------------------------------------------------------
-    # Persistence (JSON auto-save/load)
+    # Persistence (PostgreSQL)
     # ------------------------------------------------------------------
 
-    def save(self) -> None:
-        """Save all memory items to JSON file."""
-        if self._persist_path is None:
-            return
-        self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "next_id": self._next_id,
-            "items": [item.to_dict() for item in self._items],
+    def _item_to_pg_row(self, item: MemoryItem) -> dict:
+        return {
+            "content": item.content,
+            "importance": item.importance,
+            "embedding": item.embedding.tolist() if item.embedding is not None else None,
+            "category": item.category or "general",
+            "tags": item.tags or [],
+            "slot_hint": item.slot_hint or "",
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "last_accessed": item.last_accessed.isoformat() if item.last_accessed else None,
         }
-        with open(self._persist_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def load(self) -> None:
-        """Load memory items from JSON file (replaces current state)."""
-        if self._persist_path is None or not self._persist_path.exists():
+    def _pg_item_id(self, item: MemoryItem) -> Optional[int]:
+        """Return the PG-assigned id stored in item.id post-sync."""
+        return item.id if hasattr(item, "id") and item.id >= 0 else None
+
+    def _load_from_pg(self) -> None:
+        """Load memory items from PostgreSQL (replaces ``load()``)."""
+        if not self._username:
             return
         try:
-            with open(self._persist_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._items = [MemoryItem.from_dict(item) for item in data.get("items", [])]
-            self._next_id = data.get("next_id", len(self._items))
-            self._rebuild_vocab()
+            from medrag.infrastructure.storage.postgres_client import ltm_load_all
+
+            rows = ltm_load_all(self._username)
+            self._items.clear()
+            self._vocab_id.clear()
+            self._vocab.clear()
+            for r in rows:
+                embedding = (
+                    np.array(r["embedding"], dtype=np.float64)
+                    if r.get("embedding") else None
+                )
+                created = r.get("created_at")
+                accessed = r.get("last_accessed")
+                item = MemoryItem(
+                    id=r["id"],
+                    content=r["content"],
+                    importance=r["importance"] or 0.0,
+                    embedding=embedding,
+                    category=r.get("category", "general"),
+                    tags=r.get("tags") or [],
+                    slot_hint=r.get("slot_hint", ""),
+                    created_at=created if isinstance(created, datetime) else None,
+                    last_accessed=accessed if isinstance(accessed, datetime) else None,
+                )
+                self._items.append(item)
+                self._build_vocab(item.content)
+            self._next_id = (max(item.id for item in self._items) + 1) if self._items else 0
         except Exception:
-            logger.warning("Failed to load memory from %s", self._persist_path, exc_info=True)
+            logger.debug("Failed to load LTM from PG for user %s", self._username, exc_info=True)
 
     def _auto_save(self) -> None:
-        """Auto-save hook called after every store operation."""
-        if self._persist_path is not None:
-            try:
-                self.save()
-            except Exception:
-                logger.debug("Memory auto-save failed", exc_info=True)
+        """After every store operation, sync the latest item to PostgreSQL."""
+        if not self._username or not self._items:
+            return
+        try:
+            from medrag.infrastructure.storage.postgres_client import ltm_save_item
+
+            item = self._items[-1]
+            row = self._item_to_pg_row(item)
+            pg_id = ltm_save_item(
+                username=self._username,
+                content=row["content"],
+                importance=row["importance"],
+                embedding=row["embedding"],
+                category=row["category"],
+                tags=row["tags"],
+                slot_hint=row["slot_hint"],
+                created_at=row["created_at"],
+            )
+            # Sync PG-assigned id back to in-memory item
+            item.id = pg_id
+            if pg_id >= self._next_id:
+                self._next_id = pg_id + 1
+        except Exception:
+            logger.debug("LTM auto-save failed for user %s", self._username, exc_info=True)
+
+    def _sync_consolidation_to_pg(self, result: ConsolidationResult) -> None:
+        """After consolidation, sync deletions and updates to PostgreSQL."""
+        if not self._username:
+            return
+        try:
+            from medrag.infrastructure.storage.postgres_client import (
+                ltm_delete_items,
+                ltm_update_item,
+            )
+
+            if result.deleted_ids:
+                ltm_delete_ids = [i for i in result.deleted_ids if i >= 0]
+                if ltm_delete_ids:
+                    ltm_delete_items(ltm_delete_ids)
+            for item in result.updated_items:
+                row = self._item_to_pg_row(item)
+                ltm_update_item(
+                    item_id=item.id,
+                    content=row["content"],
+                    importance=row["importance"],
+                    embedding=row["embedding"],
+                    tags=row["tags"],
+                    last_accessed=row["last_accessed"],
+                )
+        except Exception:
+            logger.debug("Failed to sync consolidation to PG", exc_info=True)
 
     # ------------------------------------------------------------------
     # Utilities
