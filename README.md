@@ -5,7 +5,10 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 **MedAgent** 是一个面向医疗场景的智能问答 Agent 系统，基于多引擎 RAG + 分层记忆 + ReAct 推理构建。系统从"查询-检索-生成"的流水线进化为"感知-记忆-推理-行动"的智能体循环。
+> **数据集来源**：[Open-KG](http://data.openkg.cn/dataset/disease-information) · [cMedQA2](https://github.com/zhangsheng93/cMedQA2)  
+> **参考项目**：[RAGQnASyste](https://github.com/honeyandme/RAGQnASystem) · [mem0](https://github.com/mem0ai/mem0)
 
+---
 ---
 
 ## 架构概览
