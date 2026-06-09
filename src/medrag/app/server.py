@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent.parent / "frontend"
 
 app = FastAPI(
-    title="Medical RAG Q&A System",
+    title="MedAgent — Medical AI Agent",
     version="2.0.0",
     lifespan=lifespan,
 )

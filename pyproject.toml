@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "medrag"
+name = "medagent"
 version = "2.0.0"
-description = "Medical RAG Q&A System"
+description = "Medical AI Agent — 记忆、路由、ReAct 推理、优雅降级"
 requires-python = ">=3.10"
 
 [tool.setuptools.packages.find]

@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>医疗智能助手 — MedRAG</title>
-    <meta name="description" content="MedRAG 医疗智能助手，支持医学知识库问答、病历检索和诊疗资料管理。">
+    <title>医疗智能助手 — MedAgent</title>
+    <meta name="description" content="MedAgent 医疗智能助手，支持医学知识库问答、病历检索和诊疗资料管理。">
     <link rel="stylesheet" href="style.css">
     <!-- Markdown Parser -->
     <script src="vendor/marked.min.js"></script>
@@ -43,7 +43,7 @@
                     </svg>
                 </div>
                 <div class="logo-text">
-                    <h2>MedRAG</h2>
+                    <h2>MedAgent</h2>
                     <span class="logo-subtitle">医疗智能助手</span>
                 </div>
             </div>
@@ -580,8 +580,8 @@
                                                     <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
                                                 </div>
                                                 <div class="source-meta-line">
-                                                    <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
-                                                    <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
+                                                    <span class="source-page">排名：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                    <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">相关度：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                                 </div>
                                                 <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
                                             </li>
@@ -596,8 +596,8 @@
                                                     <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
                                                 </div>
                                                 <div class="source-meta-line">
-                                                    <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
-                                                    <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
+                                                    <span class="source-page">排名：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                    <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">相关度：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                                 </div>
                                                 <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
                                             </li>
@@ -612,8 +612,8 @@
                                                     <span v-if="chunk.page_number" class="source-page">（第 {{ chunk.page_number }} 页）</span>
                                                 </div>
                                                 <div class="source-meta-line">
-                                                    <span class="source-page">RRF名次：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
-                                                    <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">Rerank分数：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
+                                                    <span class="source-page">排名：#{{ chunk.rrf_rank || (sIndex + 1) }}</span>
+                                                    <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">相关度：{{ Number(chunk.rerank_score).toFixed(4) }}</span>
                                                 </div>
                                                 <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
                                             </li>
