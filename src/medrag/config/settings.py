@@ -85,7 +85,8 @@ class Settings:
 
     # Retrieval
     retrieval_top_k: int = _env_int("RETRIEVAL_TOP_K", 15)
-    rerank_top_k: int = _env_int("RERANK_TOP_K", 8)
+    rerank_top_k: int = _env_int("RERANK_TOP_K", 5)
+    context_budget: int = _env_int("CONTEXT_BUDGET", 4096)
 
     # LLM / DeepSeek
     llm_type: str = _env_str("LLM_TYPE", "deepseek")

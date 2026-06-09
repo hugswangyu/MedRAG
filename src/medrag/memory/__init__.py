@@ -23,6 +23,7 @@ from .classifier import classify_memory_content, get_importance
 from .graph_memory import GraphMemory
 from .long_term import LongTermMemory
 from .preference import PreferenceStore
+from .schema import ContextAssembler, Slot, estimate_tokens
 from .short_term import ConversationMessage, ShortTermMemory
 from .types import ConsolidationConfig, ConsolidationResult, MemoryItem, RecallFilter
 
@@ -280,6 +281,9 @@ __all__ = [
     "LongTermMemory",
     "PreferenceStore",
     "GraphMemory",
+    "ContextAssembler",
+    "Slot",
+    "estimate_tokens",
     "MemoryItem",
     "RecallFilter",
     "ConsolidationConfig",

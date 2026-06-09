@@ -84,6 +84,98 @@ class PromptBuilder:
             ]
         return [{"role": "user", "content": user}]
 
+    def build_messages_with_context(
+        self,
+        context: str,
+        query: str,
+        route: Optional[Dict] = None,
+        retrieval_quality: Optional[Dict] = None,
+        query_info: Optional[Dict] = None,
+    ) -> list[dict]:
+        """Build messages using a pre-assembled context (from ContextAssembler).
+
+        Compared to ``build_messages()``, this skips internal section assembly
+        and uses the externally assembled *context* string instead. The system
+        prompt (MEDICAL_ANSWER_PROMPT + type/style hints) is still auto-generated.
+        """
+        query_type = (
+            route.get("query_type", "general_medical_qa")
+            if route else "general_medical_qa"
+        )
+        type_hint = QUERY_TYPE_HINTS.get(query_type, QUERY_TYPE_HINTS["general_medical_qa"])
+        answer_style = (route or {}).get("answer_style", "general_guidance")
+        style_hint = ANSWER_STYLE_HINTS.get(answer_style, ANSWER_STYLE_HINTS["general_guidance"])
+
+        context = context.strip()
+        system = (
+            MEDICAL_ANSWER_PROMPT
+            + "\n\n## 当前问题类型\n"
+            + type_hint
+            + "\n\n## 当前回答风格\n"
+            + style_hint
+        )
+        query_block = self._format_query_block(query, query_info)
+        user = (
+            context
+            + "\n\n" + query_block
+            + "\n\n请严格根据以上检索资料回答用户的问题。"
+        )
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+
+    # ------------------------------------------------------------------
+    # Sections builder (used by ContextAssembler for budget management)
+    # ------------------------------------------------------------------
+
+    def build_sections(
+        self,
+        query: str,
+        kg_results: Optional[List[Dict]] = None,
+        qa_results: Optional[List[Dict]] = None,
+        case_results: Optional[List[Dict]] = None,
+        case_context: Optional[str] = None,
+        route: Optional[Dict] = None,
+        retrieval_quality: Optional[Dict] = None,
+        query_info: Optional[Dict] = None,
+    ) -> dict:
+        """Return individual context sections as ``{section_name: text}``.
+
+        Callers can feed these into ``ContextAssembler`` with priority levels
+        to enable global token budget management.
+        """
+        sections = {}
+
+        if self._is_tier1(retrieval_quality):
+            # Case summary
+            if case_context:
+                sections["case_summary"] = CONTEXT_CASE_HEADER.format(
+                    case_text=case_context.strip()
+                )
+
+            # Case chunks
+            if case_results:
+                case_chunks = self._format_case_results(case_results[:MAX_PER_SOURCE])
+                sections["case_chunks"] = CONTEXT_USER_CASE_CHUNKS_HEADER.format(
+                    case_chunks=case_chunks
+                )
+
+            # KG
+            if kg_results:
+                kg_text = self._format_kg_results(kg_results[:MAX_PER_SOURCE])
+                sections["kg"] = CONTEXT_KG_HEADER.format(kg_text=kg_text)
+
+            # QA
+            if qa_results:
+                qa_text = self._format_qa_results(qa_results[:MAX_PER_SOURCE])
+                sections["qa"] = CONTEXT_QA_HEADER.format(qa_text=qa_text)
+
+        # Query block always included
+        sections["query"] = self._format_query_block(query, query_info)
+
+        return sections
+
     # ------------------------------------------------------------------
     # Tier 1：完整回答构建
     # ------------------------------------------------------------------

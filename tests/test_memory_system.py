@@ -256,6 +256,65 @@ class TestMemoryPersistence:
         assert ms.stats["ltm_count"] == 1
 
 
+# ============================================================================
+# ContextAssembler（Schema-Driven Assembly）
+# ============================================================================
+
+
+class TestContextAssembler:
+    """Schema-Driven Assembly 测试。"""
+
+    def test_assemble_basic(self):
+        from medrag.memory import ContextAssembler
+        a = ContextAssembler(budget=4096)
+        a.add("memory", "【长期记忆】\n- 患者有高血压", priority=100)
+        a.add("kg", "【知识图谱】\n- 高血压低盐饮食", priority=80)
+        result = a.assemble()
+        assert "高血压" in result
+        assert a.total_tokens > 0
+
+    def test_assemble_empty(self):
+        from medrag.memory import ContextAssembler
+        a = ContextAssembler(budget=4096)
+        assert a.assemble() == ""
+
+    def test_budget_pruning_drops_low_priority(self):
+        from medrag.memory import ContextAssembler
+        a = ContextAssembler(budget=10)
+        a.add("memory", "患者有高血压病史", priority=100)
+        a.add("qa", "多喝水休息有助于康复" * 20, priority=70)
+        result = a.assemble()
+        assert "高血压" in result
+        assert "多喝水" not in result
+        assert "qa" in a.dropped_slots
+
+    def test_all_slots_under_budget(self):
+        from medrag.memory import ContextAssembler
+        a = ContextAssembler(budget=9999)
+        a.add("memory", "记忆内容", priority=100)
+        a.add("kg", "图谱内容", priority=80)
+        a.add("qa", "问答内容", priority=70)
+        result = a.assemble()
+        assert "记忆内容" in result
+        assert "图谱内容" in result
+        assert "问答内容" in result
+        assert not a.dropped_slots
+
+    def test_estimate_tokens(self):
+        from medrag.memory.schema import estimate_tokens
+        assert estimate_tokens("hello world") > 0
+        assert estimate_tokens("你好世界") > 0
+        assert estimate_tokens("") == 0
+
+    def test_reset(self):
+        from medrag.memory import ContextAssembler
+        a = ContextAssembler(budget=4096)
+        a.add("memory", "内容", priority=100)
+        assert a.assemble() != ""
+        a.reset()
+        assert a.assemble() == ""
+
+
 class TestChatServiceMemoryIntegration:
     """验证 chat_service 各 handler 正确与 MemorySystem 交互。"""
 
@@ -342,13 +401,13 @@ class TestChatServiceMemoryIntegration:
         assert service.memory.stats["stm_count"] >= 2
 
     def test_rag_handler_injects_memory_context(self, service):
-        """RAG 模式：应当将记忆上下文注入系统提示词。"""
+        """RAG 模式：应当将记忆上下文注入用户消息（Schema-Driven Assembly）。"""
         service.memory.add_message("user", "我对青霉素过敏")
         with patch.object(service.answer_generator, "generate") as mock_gen:
             service._handle_rag("感冒了怎么办", {"execution_mode": "rag"})
             call_kwargs = mock_gen.call_args[0][0]
-            system_text = call_kwargs[0]["content"]
-            assert "青霉素" in system_text
+            user_text = call_kwargs[1]["content"]
+            assert "青霉素" in user_text
 
     def test_react_stub_records_memory(self, service):
         """ReAct stub：应当记录消息。"""

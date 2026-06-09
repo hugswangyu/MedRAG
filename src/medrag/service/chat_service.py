@@ -370,10 +370,27 @@ class MedicalChatService:
             ),
         }
 
-        # 5. 提示词
+        # 5. 获取 query embedding（用于 LTM 语义召回增强）
+        query_emb = self._get_query_embedding(query)
+
+        # 6. Schema-Driven Context Assembly（优先级 + Token 预算）
+        from medrag.memory import ContextAssembler
+        from medrag.memory.schema import (
+            PRIORITY_MEMORY, PRIORITY_CASE_SUMMARY, PRIORITY_KG,
+            PRIORITY_QA, PRIORITY_CASE_CHUNKS,
+        )
+
+        assembler = ContextAssembler(budget=settings.context_budget)
+
+        # 6a. 记忆上下文（最高优先级）
+        if retrieval_quality.get("confidence") != "none":
+            mem_context = self.memory.build_context(query, query_embedding=query_emb)
+            assembler.add("memory", mem_context, priority=PRIORITY_MEMORY)
+
+        # 6b. 检索结果 sections
         if user_case_summary is None and username:
             user_case_summary = get_combined_case_summary(username)
-        messages = self.prompt_builder.build_messages(
+        sections = self.prompt_builder.build_sections(
             query=query,
             kg_results=retrieval["kg_results"],
             qa_results=retrieval["qa_results"],
@@ -384,14 +401,26 @@ class MedicalChatService:
             query_info=retrieval.get("query_info"),
         )
 
-        # 6. 获取 query embedding（用于 LTM 语义召回增强）
-        query_emb = self._get_query_embedding(query)
+        # Map section name → priority (higher = kept first under budget)
+        section_priorities = {
+            "case_summary": PRIORITY_CASE_SUMMARY,
+            "case_chunks": PRIORITY_CASE_CHUNKS,
+            "kg": PRIORITY_KG,
+            "qa": PRIORITY_QA,
+            "query": 50,
+        }
+        for name, text in sections.items():
+            assembler.add(name, text, priority=section_priorities.get(name, 50))
 
-        # 7. 置信度联动：低置信时不注入记忆上下文（避免误导）
-        if retrieval_quality.get("confidence") != "none":
-            mem_context = self.memory.build_context(query, query_embedding=query_emb)
-            if mem_context and messages and messages[0]["role"] == "system":
-                messages[0]["content"] = f"{mem_context}\n\n{messages[0]['content']}"
+        # 6c. Assemble with budget pruning
+        context = assembler.assemble()
+        messages = self.prompt_builder.build_messages_with_context(
+            context=context,
+            query=query,
+            route=route,
+            retrieval_quality=retrieval_quality,
+            query_info=retrieval.get("query_info"),
+        )
 
         # 记录用户消息（带 embedding，提升 LTM 内联去重和召回质量）
         if query_emb is not None:
@@ -399,10 +428,10 @@ class MedicalChatService:
         else:
             self.memory.add_message("user", query)
 
-        # 8. 生成
+        # 7. 生成
         answer = self.answer_generator.generate(messages)
 
-        # 9. 安全提示
+        # 8. 安全提示
         answer = self.safety_guard.append_safety_notice(
             answer, risk_info,
             retrieval_quality=retrieval_quality["confidence"],
@@ -476,14 +505,33 @@ class MedicalChatService:
             ),
         }
 
-        # 5. 提示词
+        # 5. 提示词（Schema-Driven Context Assembly）
         yield {
             "type": "rag_step",
             "step": {"key": "prompt", "label": "构建提示词", "icon": "📝"},
         }
         if user_case_summary is None and username:
             user_case_summary = get_combined_case_summary(username)
-        messages = self.prompt_builder.build_messages(
+
+        # 获取 query embedding（用于 LTM 语义召回增强）
+        query_emb = self._get_query_embedding(query)
+
+        # Schema-Driven Context Assembly
+        from medrag.memory import ContextAssembler
+        from medrag.memory.schema import (
+            PRIORITY_MEMORY, PRIORITY_CASE_SUMMARY, PRIORITY_KG,
+            PRIORITY_QA, PRIORITY_CASE_CHUNKS,
+        )
+
+        assembler = ContextAssembler(budget=settings.context_budget)
+
+        # 记忆上下文（最高优先级）
+        if retrieval_quality.get("confidence") != "none":
+            mem_context = self.memory.build_context(query, query_embedding=query_emb)
+            assembler.add("memory", mem_context, priority=PRIORITY_MEMORY)
+
+        # 检索结果 sections
+        sections = self.prompt_builder.build_sections(
             query=query,
             kg_results=retrieval["kg_results"],
             qa_results=retrieval["qa_results"],
@@ -493,15 +541,24 @@ class MedicalChatService:
             retrieval_quality=retrieval_quality,
             query_info=retrieval.get("query_info"),
         )
+        section_priorities = {
+            "case_summary": PRIORITY_CASE_SUMMARY,
+            "case_chunks": PRIORITY_CASE_CHUNKS,
+            "kg": PRIORITY_KG,
+            "qa": PRIORITY_QA,
+            "query": 50,
+        }
+        for name, text in sections.items():
+            assembler.add(name, text, priority=section_priorities.get(name, 50))
 
-        # 获取 query embedding（用于 LTM 语义召回增强）
-        query_emb = self._get_query_embedding(query)
-
-        # 置信度联动：低置信时不注入记忆上下文
-        if retrieval_quality.get("confidence") != "none":
-            mem_context = self.memory.build_context(query, query_embedding=query_emb)
-            if mem_context and messages and messages[0]["role"] == "system":
-                messages[0]["content"] = f"{mem_context}\n\n{messages[0]['content']}"
+        context = assembler.assemble()
+        messages = self.prompt_builder.build_messages_with_context(
+            context=context,
+            query=query,
+            route=route,
+            retrieval_quality=retrieval_quality,
+            query_info=retrieval.get("query_info"),
+        )
 
         # 记录用户消息（带 embedding，提升 LTM 内联去重和召回质量）
         if query_emb is not None:
