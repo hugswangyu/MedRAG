@@ -98,81 +98,43 @@ class MedicalChatService:
     # 公开 API
     # ------------------------------------------------------------------
 
+    # 延迟导入，避免循环依赖
+    _tools_checked = False
+
+    def _get_tool_registry(self):
+        if not self._tools_checked:
+            from medrag.tools import get_tool_registry
+            self._tool_registry = get_tool_registry()
+            type(self)._tools_checked = True
+        return self._tool_registry
+
     def chat(
         self,
         query: str,
         user_case_summary: Optional[str] = None,
         username: Optional[str] = None,
     ) -> Dict:
-        """运行完整的医疗问答流水线。
+        """运行多模式医疗问答。
 
-        Args:
-            query: 用户的医学问题。
-            user_case_summary: 预先计算的病例摘要，或 ``None``。
-
-        Returns:
-            字典，键为：``answer``、``route``、``kg_results``、
-            ``qa_results``、``qa_source_details``、``risk_info``。
+        自动检查三个内置工具（剂量计算/科室导诊/正常值查询），
+        不命中则按 Router 分发的执行模式处理。
         """
-        # 1. 风险检测（在检索之前，以便尽早标记）
-        risk_info = self.safety_guard.detect_risk(query)
+        # 0. 优先检查工具匹配（快速路径，不走 Router/Retrieval）
+        tool_name, tool_params = self._get_tool_registry().match(query)
+        if tool_name is not None:
+            return self._handle_tool(query, tool_name, tool_params)
 
-        # 2. 多源检索
-        retrieval = self.hybrid_retriever.retrieve(query, username=username)
+        # 1. 路由 — 获取 execution_mode
+        route = self.hybrid_retriever.router.route(query)
+        mode = route.get("execution_mode", "rag")
 
-        # 3. 对 QA 结果进行 Cross-Encoder 重排序（KG 结果不参与重排）
-        retrieval["qa_results"] = self.reranker.rerank(
-            query,
-            retrieval["qa_results"],
-            top_k=settings.rerank_top_k,
-        )
-
-        # 4. 计算检索质量
-        retrieval_quality = {
-            "has_kg": bool(retrieval["kg_results"]),
-            "has_qa": bool(retrieval["qa_results"]),
-            "has_case": bool(retrieval.get("case_results")),
-            "confidence": (
-                "high" if (retrieval["kg_results"] or retrieval["qa_results"] or retrieval.get("case_results"))
-                else "none"
-            ),
-        }
-
-        # 5. 构建提示词
-        if user_case_summary is None and username:
-            user_case_summary = get_combined_case_summary(username)
-
-        messages = self.prompt_builder.build_messages(
-            query=query,
-            kg_results=retrieval["kg_results"],
-            qa_results=retrieval["qa_results"],
-            case_results=retrieval.get("case_results", []),
-            case_context=user_case_summary,
-            route=retrieval["route"],
-            retrieval_quality=retrieval_quality,
-            query_info=retrieval.get("query_info"),
-        )
-
-        # 6. 生成回答
-        answer = self.answer_generator.generate(messages)
-
-        # 7. 注入安全提示
-        query_type = retrieval.get("route", {}).get("query_type")
-        answer = self.safety_guard.append_safety_notice(
-            answer, risk_info, retrieval_quality=retrieval_quality["confidence"],
-            query_type=query_type,
-        )
-
-        return {
-            "answer": answer,
-            "route": retrieval["route"],
-            "kg_results": retrieval["kg_results"],
-            "qa_results": retrieval["qa_results"],
-            "case_results": retrieval.get("case_results", []),
-            "qa_source_details": retrieval.get("qa_source_details", {}),
-            "risk_info": risk_info,
-            "query_info": retrieval.get("query_info"),
-        }
+        # 2. 按模式分发
+        if mode == "chat":
+            return self._handle_chat(query, route)
+        elif mode == "react":
+            return self._handle_react_stub(query, route)
+        else:  # "rag"（默认）
+            return self._handle_rag(query, route, user_case_summary, username)
 
     def stream_chat(
         self,
@@ -183,52 +145,159 @@ class MedicalChatService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
     ) -> Generator[Dict, None, None]:
-        """流式版本的医疗 QA 流水线。
+        """多模式流式问答。
 
-        逐步 yield 事件字典：
-        ``{"type": "rag_step", "step": {...}}``
-        ``{"type": "trace", "rag_trace": {...}}``
-        ``{"type": "content", "content": "token"}``
-
-        Args:
-            query: 用户问题。
-            user_case_summary: 可选的病例摘要。
-            department: 可选科室过滤（非"全科"时传入 Milvus 检索）。
-            provider: 可选 LLM 提供商（deepseek/zhipuai/ollama），默认使用 settings.llm_provider。
-            model: 可选模型名，默认使用对应 provider 的默认模型。
+        模式自适应：工具 → Chat → RAG → ReAct(stub)，自动选择。
         """
-        # 动态创建 AnswerGenerator（仅在 provider 不同时切换）
+        # 0. 优先检查工具匹配
+        tool_name, tool_params = self._get_tool_registry().match(query)
+        if tool_name is not None:
+            yield from self._stream_tool(query, tool_name, tool_params)
+            return
+
+        # 1. 路由
+        route = self.hybrid_retriever.router.route(query)
+        mode = route.get("execution_mode", "rag")
+
+        # 2. 分发
+        if mode == "chat":
+            yield from self._stream_chat(query, route, provider, model)
+        elif mode == "react":
+            yield from self._stream_react_stub(query, route)
+        else:
+            yield from self._stream_rag(
+                query, route, user_case_summary, username,
+                department, provider, model,
+            )
+
+    # ------------------------------------------------------------------
+    # Chat 模式
+    # ------------------------------------------------------------------
+
+    def _handle_chat(self, query: str, route: dict) -> Dict:
+        """Chat 模式：直接 LLM 回复，不走 RAG。"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个友好的医疗助手。请以亲切、自然的语气简短回复用户的问候或闲聊。",
+            },
+            {"role": "user", "content": query},
+        ]
+        answer = self.answer_generator.generate(messages)
+        return {
+            "answer": answer,
+            "route": route,
+            "kg_results": [],
+            "qa_results": [],
+            "case_results": [],
+            "qa_source_details": {},
+            "risk_info": {"has_risk": False, "risk_keywords": []},
+            "query_info": None,
+        }
+
+    def _stream_chat(
+        self, query: str, route: dict,
+        provider: Optional[str] = None, model: Optional[str] = None,
+    ) -> Generator[Dict, None, None]:
+        """流式 Chat 模式。"""
         if provider and provider != settings.llm_provider:
             _gen_provider = get_llm_provider(provider)
             answer_gen = AnswerGenerator(llm_provider=_gen_provider)
         else:
             answer_gen = self.answer_generator
-        # 1. 风险检测
+
         yield {
             "type": "rag_step",
-            "step": {"key": "risk", "label": "安全检测", "icon": "🛡️", "detail": "扫描风险关键词"},
+            "step": {"key": "chat", "label": "闲聊回复", "icon": "💬"},
         }
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个友好的医疗助手。请以亲切、自然的语气简短回复用户的问候或闲聊。",
+            },
+            {"role": "user", "content": query},
+        ]
+        for token in answer_gen.generate_stream(messages, model=model):
+            yield {"type": "content", "content": token}
+
+    # ------------------------------------------------------------------
+    # Tool 模式
+    # ------------------------------------------------------------------
+
+    def _handle_tool(self, query: str, tool_name: str, tool_params: dict) -> Dict:
+        """Tool 模式：执行原生工具，直接返回结构化结果。"""
+        result = self._tool_registry.execute(tool_name, **tool_params)
+        return {
+            "answer": result,
+            "route": {"execution_mode": "tool", "tool_name": tool_name},
+            "kg_results": [],
+            "qa_results": [],
+            "case_results": [],
+            "qa_source_details": {},
+            "risk_info": {"has_risk": False, "risk_keywords": []},
+            "query_info": None,
+        }
+
+    def _stream_tool(
+        self, query: str, tool_name: str, tool_params: dict,
+    ) -> Generator[Dict, None, None]:
+        """流式 Tool 模式：单次 yield 完整结果。"""
+        yield {
+            "type": "rag_step",
+            "step": {"key": "tool", "label": "工具调用", "icon": "🔧", "detail": tool_name},
+        }
+        result = self._tool_registry.execute(tool_name, **tool_params)
+        yield {"type": "content", "content": result}
+
+    # ------------------------------------------------------------------
+    # ReAct stub
+    # ------------------------------------------------------------------
+
+    def _handle_react_stub(self, query: str, route: dict) -> Dict:
+        """ReAct stub：提示尚未启用。"""
+        return {
+            "answer": "复杂推理模式正在开发中，请使用其他方式查询。",
+            "route": {**route, "execution_mode": "react"},
+            "kg_results": [],
+            "qa_results": [],
+            "case_results": [],
+            "qa_source_details": {},
+            "risk_info": {"has_risk": False, "risk_keywords": []},
+            "query_info": None,
+        }
+
+    def _stream_react_stub(self, query: str, route: dict) -> Generator[Dict, None, None]:
+        yield {
+            "type": "rag_step",
+            "step": {"key": "react", "label": "复杂推理", "icon": "🧠", "detail": "模式尚未启用"},
+        }
+        yield {"type": "content", "content": "复杂推理模式正在开发中，请使用其他方式查询。"}
+
+    # ------------------------------------------------------------------
+    # RAG 模式（原有完整流水线）
+    # ------------------------------------------------------------------
+
+    def _handle_rag(
+        self,
+        query: str,
+        route: dict,
+        user_case_summary: Optional[str] = None,
+        username: Optional[str] = None,
+    ) -> Dict:
+        """RAG 模式：完整的检索-重排序-生成流水线。"""
+        # 1. 风险检测
         risk_info = self.safety_guard.detect_risk(query)
 
-        # 2. 多源检索（按科室过滤）
-        yield {
-            "type": "rag_step",
-            "step": {"key": "retrieve", "label": "多源检索", "icon": "🔍", "detail": "知识图谱 + 向量库"},
-        }
-        retrieval = self.hybrid_retriever.retrieve(query, department=department, username=username)
+        # 2. 多源检索
+        retrieval = self.hybrid_retriever.retrieve(query, username=username)
+        retrieval["route"] = route  # 保留外部 execution_mode
 
-        # 3. 对 QA 结果进行 Cross-Encoder 重排序（KG 结果不参与重排）
-        yield {
-            "type": "rag_step",
-            "step": {"key": "rerank", "label": "QA结果重排序", "icon": "📊", "detail": f"共 {len(retrieval['qa_results'])} 条候选"},
-        }
+        # 3. 重排序
         retrieval["qa_results"] = self.reranker.rerank(
-            query,
-            retrieval["qa_results"],
-            top_k=settings.rerank_top_k,
+            query, retrieval["qa_results"], top_k=settings.rerank_top_k,
         )
 
-        # 4. 计算检索质量
+        # 4. 检索质量
         retrieval_quality = {
             "has_kg": bool(retrieval["kg_results"]),
             "has_qa": bool(retrieval["qa_results"]),
@@ -239,31 +308,118 @@ class MedicalChatService:
             ),
         }
 
-        # 5. 构建提示词
-        yield {
-            "type": "rag_step",
-            "step": {"key": "prompt", "label": "构建提示词", "icon": "📝"},
-        }
+        # 5. 提示词
         if user_case_summary is None and username:
             user_case_summary = get_combined_case_summary(username)
-
         messages = self.prompt_builder.build_messages(
             query=query,
             kg_results=retrieval["kg_results"],
             qa_results=retrieval["qa_results"],
             case_results=retrieval.get("case_results", []),
             case_context=user_case_summary,
-            route=retrieval["route"],
+            route=route,
             retrieval_quality=retrieval_quality,
             query_info=retrieval.get("query_info"),
         )
 
-        # 5. 发送检索溯源信息
+        # 6. 生成
+        answer = self.answer_generator.generate(messages)
+
+        # 7. 安全提示
+        answer = self.safety_guard.append_safety_notice(
+            answer, risk_info,
+            retrieval_quality=retrieval_quality["confidence"],
+            query_type=route.get("query_type"),
+        )
+
+        return {
+            "answer": answer,
+            "route": route,
+            "kg_results": retrieval["kg_results"],
+            "qa_results": retrieval["qa_results"],
+            "case_results": retrieval.get("case_results", []),
+            "qa_source_details": retrieval.get("qa_source_details", {}),
+            "risk_info": risk_info,
+            "query_info": retrieval.get("query_info"),
+        }
+
+    def _stream_rag(
+        self,
+        query: str,
+        route: dict,
+        user_case_summary: Optional[str] = None,
+        username: Optional[str] = None,
+        department: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Generator[Dict, None, None]:
+        """流式 RAG 模式。"""
+        # 动态创建 AnswerGenerator
+        if provider and provider != settings.llm_provider:
+            _gen_provider = get_llm_provider(provider)
+            answer_gen = AnswerGenerator(llm_provider=_gen_provider)
+        else:
+            answer_gen = self.answer_generator
+
+        # 1. 风险检测
+        yield {
+            "type": "rag_step",
+            "step": {"key": "risk", "label": "安全检测", "icon": "🛡️", "detail": "扫描风险关键词"},
+        }
+        risk_info = self.safety_guard.detect_risk(query)
+
+        # 2. 多源检索
+        yield {
+            "type": "rag_step",
+            "step": {"key": "retrieve", "label": "多源检索", "icon": "🔍", "detail": "知识图谱 + 向量库"},
+        }
+        retrieval = self.hybrid_retriever.retrieve(query, department=department, username=username)
+        retrieval["route"] = route
+
+        # 3. 重排序
+        yield {
+            "type": "rag_step",
+            "step": {"key": "rerank", "label": "QA结果重排序", "icon": "📊", "detail": f"共 {len(retrieval['qa_results'])} 条候选"},
+        }
+        retrieval["qa_results"] = self.reranker.rerank(
+            query, retrieval["qa_results"], top_k=settings.rerank_top_k,
+        )
+
+        # 4. 检索质量
+        retrieval_quality = {
+            "has_kg": bool(retrieval["kg_results"]),
+            "has_qa": bool(retrieval["qa_results"]),
+            "has_case": bool(retrieval.get("case_results")),
+            "confidence": (
+                "high" if (retrieval["kg_results"] or retrieval["qa_results"] or retrieval.get("case_results"))
+                else "none"
+            ),
+        }
+
+        # 5. 提示词
+        yield {
+            "type": "rag_step",
+            "step": {"key": "prompt", "label": "构建提示词", "icon": "📝"},
+        }
+        if user_case_summary is None and username:
+            user_case_summary = get_combined_case_summary(username)
+        messages = self.prompt_builder.build_messages(
+            query=query,
+            kg_results=retrieval["kg_results"],
+            qa_results=retrieval["qa_results"],
+            case_results=retrieval.get("case_results", []),
+            case_context=user_case_summary,
+            route=route,
+            retrieval_quality=retrieval_quality,
+            query_info=retrieval.get("query_info"),
+        )
+
+        # 溯源信息
         rag_trace = {
             "tool_used": True,
             "tool_name": "multi-source-retrieval",
             "retrieval_stage": "initial",
-            "retrieval_mode": retrieval["route"].get("query_type", ""),
+            "retrieval_mode": route.get("query_type", ""),
             "query_info": retrieval.get("query_info"),
             "initial_retrieved_chunks": [
                 {
@@ -271,6 +427,7 @@ class MedicalChatService:
                     "text": (r.get("answer") or r.get("text") or r.get("evidence", ""))[:200],
                     "rrf_rank": i + 1,
                     "rrf_score": r.get("rrf_score", 0),
+                    "rerank_score": r.get("ce_score") or r.get("final_score", 0),
                     "source_rank": r.get("rrf_source_rank", 0),
                 }
                 for i, r in enumerate(
@@ -280,7 +437,7 @@ class MedicalChatService:
         }
         yield {"type": "trace", "rag_trace": rag_trace}
 
-        # 6. LLM 流式生成
+        # 6. 流式生成
         yield {
             "type": "rag_step",
             "step": {"key": "generate", "label": "生成回答", "icon": "✨"},
@@ -290,11 +447,11 @@ class MedicalChatService:
             full_answer += token
             yield {"type": "content", "content": token}
 
-        # 7. 安全提示尾注（作为最后一个 content 事件发送）
-        query_type = retrieval.get("route", {}).get("query_type")
+        # 7. 安全提示尾注
         footer = self.safety_guard.append_safety_notice(
-            "", risk_info, retrieval_quality=retrieval_quality["confidence"],
-            query_type=query_type,
+            "", risk_info,
+            retrieval_quality=retrieval_quality["confidence"],
+            query_type=route.get("query_type"),
         )
         if footer.strip():
             yield {"type": "content", "content": "\n\n" + footer}
