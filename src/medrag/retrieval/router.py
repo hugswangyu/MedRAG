@@ -2,7 +2,7 @@
 
 将用户问题路由到合适的检索源：
   - neo4j_kg      结构化医学知识图谱（疾病、症状、药品、饮食等）
-  - toyhom_qa     Toyhom 医学问答向量库
+  - qa            cMedQA2 医学问答向量库
 
 支持两种模式：
   - LLM 路由（默认）：语义分类，附带规则回退。
@@ -112,7 +112,7 @@ _ROUTER_SYSTEM = """你是一个医疗问答路由分类器。你的任务是根
 
 可选信息源：
 - kg: Neo4j 医学知识图谱（疾病、症状、药品、饮食、科室等结构化知识）
-- qa: Toyhom 医疗问答向量库（通用医学问答）
+- qa: cMedQA2 医疗问答向量库（通用医学问答）
 
 可选 query_type：
 - disease_fact: 疾病事实查询（病因、预防、并发症、治愈率、简介等）
@@ -173,7 +173,7 @@ class QueryRouter:
     def route(self, query: str, use_llm: bool = True) -> Dict:
         """将 *query* 路由到检索源。
 
-        返回字典，键为：use_kg、use_toyhom_qa、reason、query_type。
+        返回字典，键为：use_kg、use_qa、reason、query_type。
         """
         if use_llm and self.llm is not None:
             result = self._llm_route(query)
@@ -231,7 +231,7 @@ class QueryRouter:
 
         canonical: Dict = {
             "use_kg": data.get("kg", data.get("use_kg", False)),
-            "use_toyhom_qa": data.get("qa", data.get("use_toyhom_qa", False)),
+            "use_qa": data.get("qa", data.get("use_qa", False)),
             "reason": data.get("reason", ""),
             "query_type": data.get("query_type", ""),
             "needs_case_context": bool(data.get("needs_case_context", False)),
@@ -243,8 +243,8 @@ class QueryRouter:
             return None
 
         # 确保至少启用一个数据源
-        if not (canonical["use_kg"] or canonical["use_toyhom_qa"]):
-            canonical["use_toyhom_qa"] = True
+        if not (canonical["use_kg"] or canonical["use_qa"]):
+            canonical["use_qa"] = True
 
         return canonical
 
@@ -259,14 +259,14 @@ class QueryRouter:
                 reason = _build_reason(kg, toyhom, keywords, query)
                 return {
                     "use_kg": kg,
-                    "use_toyhom_qa": toyhom,
+                    "use_qa": toyhom,
                     "reason": reason,
                     "query_type": qtype,
                 }
 
         return {
             "use_kg": False,
-            "use_toyhom_qa": True,
+            "use_qa": True,
             "reason": "未匹配到特定规则，默认使用通用问答库",
             "query_type": _FALLBACK_QUERY_TYPE,
         }
@@ -298,5 +298,5 @@ def _build_reason(kg: bool, toyhom: bool, keywords: list[str], query: str) -> st
     if kg:
         parts.append(f"命中知识图谱关键词「{tag}」→ 开启 neo4j_kg")
     if toyhom:
-        parts.append(f"命中关键词「{tag}」→ 开启 toyhom_qa")
+        parts.append(f"命中关键词「{tag}」→ 开启 qa")
     return "；".join(parts) if parts else f"关键词匹配: {tag}"

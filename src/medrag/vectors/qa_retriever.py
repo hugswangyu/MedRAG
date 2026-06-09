@@ -1,4 +1,4 @@
-"""Toyhom 医疗问答检索器，基于 Milvus / Zilliz Cloud。"""
+"""医疗问答检索器，基于 Milvus / Zilliz Cloud（cMedQA2 数据集）。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from medrag.vectors.embedding import EmbeddingModel
 from medrag.vectors.milvus_client import MilvusClientWrapper
 
 
-class ToyhomQARetriever:
+class QARetriever:
     def __init__(
         self,
         model_name: str = settings.embedding_model_name,
@@ -63,21 +63,21 @@ class ToyhomQARetriever:
         for hit in results[0]:
             hits.append(
                 {
-                    "source": "toyhom_qa",
+                    "source": "cmedqa2",
                     "id": hit.entity.get("pk"),
                     "score": float(hit.distance),
-                    "department": hit.entity.get("department"),
-                    "title": hit.entity.get("title"),
-                    "question": hit.entity.get("question"),
-                    "answer": hit.entity.get("answer"),
-                    "text": hit.entity.get("text"),
+                    "department": hit.entity.get("department") or "",
+                    "title": hit.entity.get("title") or "",
+                    "question": hit.entity.get("question") or "",
+                    "answer": hit.entity.get("answer") or "",
+                    "text": hit.entity.get("text") or "",
                 }
             )
         return hits
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="通过 Milvus 搜索 Toyhom 医学问答。")
+    parser = argparse.ArgumentParser(description="通过 Milvus 搜索医疗问答（cMedQA2）。")
     parser.add_argument("query", nargs="?", help="搜索查询。")
     parser.add_argument("--top_k", type=int, default=5, help="返回结果数量。")
     parser.add_argument("--department", default=None, help="按科室过滤。")
@@ -93,7 +93,7 @@ def main() -> None:
             print("查询不能为空")
             sys.exit(1)
 
-    retriever = ToyhomQARetriever()
+    retriever = QARetriever()
     results = retriever.search(query, top_k=args.top_k, department=args.department)
 
     print(f"\n查询: {query}")

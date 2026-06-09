@@ -97,7 +97,7 @@ class MilvusClientWrapper:
             FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=VARCHAR_LIMITS["source"]),
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim),
         ]
-        schema = CollectionSchema(fields=fields, description="Toyhom medical QA vector collection")
+        schema = CollectionSchema(fields=fields, description="Medical QA vector collection (cMedQA2)")
         self.collection = Collection(
             name=self.collection_name,
             schema=schema,
@@ -130,7 +130,7 @@ class MilvusClientWrapper:
                     "question": self._clip(doc.get("question", ""), "question"),
                     "answer": self._clip(doc.get("answer", ""), "answer"),
                     "text": self._clip(doc.get("text", ""), "text"),
-                    "source": self._clip(doc.get("source", "toyhom"), "source"),
+                    "source": self._clip(doc.get("source", "cmedqa2"), "source"),
                     "embedding": embedding,
                 }
             )

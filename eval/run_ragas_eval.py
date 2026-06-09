@@ -10,7 +10,7 @@ import argparse
 import json
 from pathlib import Path
 from statistics import mean
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -25,7 +25,7 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 def _contexts_from_result(result: dict) -> list[str]:
     contexts: list[str] = []
-    for key in ("case_results", "kg_results", "toyhom_results", "reranked_results"):
+    for key in ("case_results", "kg_results", "toyhom_results"):
         for item in result.get(key) or []:
             text = item.get("answer") or item.get("text") or item.get("evidence") or ""
             if isinstance(text, list):
@@ -33,15 +33,6 @@ def _contexts_from_result(result: dict) -> list[str]:
             if text:
                 contexts.append(str(text))
     return contexts
-
-
-def _keyword_hit_rate(keywords: Iterable[str], contexts: Iterable[str], answer: str) -> float:
-    words = [kw for kw in keywords if kw]
-    if not words:
-        return 1.0
-    blob = "\n".join(contexts) + "\n" + answer
-    hits = sum(1 for kw in words if kw in blob)
-    return hits / len(words)
 
 
 def _run_pipeline(cases: list[dict], username: str) -> list[dict]:
@@ -74,21 +65,11 @@ def _run_pipeline(cases: list[dict], username: str) -> list[dict]:
 
 def _custom_metrics(rows: list[dict]) -> dict:
     route_hits = []
-    keyword_rates = []
-    empty_context = []
     safety_hits = []
     for row in rows:
         expected_route = row.get("expected_route")
         if expected_route:
             route_hits.append(row.get("route", {}).get("query_type") == expected_route)
-        keyword_rates.append(
-            _keyword_hit_rate(
-                row.get("expected_context_keywords") or [],
-                row.get("contexts") or [],
-                row.get("answer") or "",
-            )
-        )
-        empty_context.append(not bool(row.get("contexts")))
         if str(row.get("id", "")).startswith("safety_"):
             answer = row.get("answer") or ""
             risk = row.get("risk_info") or {}
@@ -99,8 +80,6 @@ def _custom_metrics(rows: list[dict]) -> dict:
 
     return {
         "route_accuracy": mean(route_hits) if route_hits else None,
-        "context_keyword_hit_rate": mean(keyword_rates) if keyword_rates else None,
-        "empty_context_rate": mean(empty_context) if empty_context else None,
         "safety_hit_rate": mean(safety_hits) if safety_hits else None,
     }
 
@@ -139,6 +118,15 @@ def _try_ragas(rows: list[dict]) -> dict | None:
         return {"summary": dict(result)}
     except Exception as exc:
         return {"skipped": True, "reason": f"ragas evaluation failed: {exc}"}
+
+
+def _keyword_hit_rate(keywords: list[str], contexts: list[str], answer: str) -> float:
+    """关键词命中率：检查 keywords 是否出现在 contexts 或 answer 中。"""
+    if not keywords:
+        return 1.0
+    text = " ".join(contexts) + " " + answer
+    hits = sum(1 for kw in keywords if kw in text)
+    return hits / len(keywords)
 
 
 def _write_report(path: Path, payload: Dict[str, Any]) -> None:

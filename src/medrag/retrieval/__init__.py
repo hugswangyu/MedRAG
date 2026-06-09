@@ -1,3 +1,4 @@
+from medrag.retrieval.es_retriever import ESBM25Retriever
 from medrag.retrieval.hybrid_retriever import HybridRetriever
 from medrag.retrieval.intent import recognize_intents
 from medrag.retrieval.query_normalizer import QueryNormalizer, NormalizedQuery
@@ -10,7 +11,7 @@ except Exception:  # pragma: no cover - optional Neo4j/py2neo dependency
     KGRetriever = None  # type: ignore[assignment]
 
 __all__ = [
-    "CrossEncoderReranker", "get_reranker", "HybridRetriever",
+    "CrossEncoderReranker", "ESBM25Retriever", "get_reranker", "HybridRetriever",
     "KGRetriever", "QueryRouter", "SimpleReranker", "recognize_intents",
     "QueryNormalizer", "NormalizedQuery",
 ]

@@ -46,7 +46,8 @@ class MedicalChatService:
     def __init__(
         self,
         kg_retriever=None,          # KGRetriever 实例 或 None → 自动加载
-        toyhom_retriever=None,      # ToyhomQARetriever 或 None → 自动创建
+        qa_retriever=None,          # QARetriever 或 None → 自动创建
+        es_retriever=None,          # ESBM25Retriever 或 None → 自动创建
         router=None,                # QueryRouter 或 None → 自动创建
         hybrid_retriever=None,      # HybridRetriever 或 None → 由上述组件组装
         reranker=None,              # reranker 实例 或 None → get_reranker()
@@ -70,14 +71,18 @@ class MedicalChatService:
                 project_root = Path(__file__).resolve().parent.parent.parent.parent
                 kg_retriever = load_ner_model(project_root, llm_client=_llm_client)
 
-            from medrag.vectors.toyhom_retriever import ToyhomQARetriever
-            _toyhom = toyhom_retriever or ToyhomQARetriever()
+            from medrag.vectors.qa_retriever import QARetriever
+            _qa = qa_retriever or QARetriever()
+
+            from medrag.retrieval.es_retriever import ESBM25Retriever
+            _es = es_retriever or ESBM25Retriever()
 
             _router = router or QueryRouter(llm_client=_llm_client)
 
             self.hybrid_retriever = HybridRetriever(
                 kg_retriever=kg_retriever,
-                toyhom_retriever=_toyhom,
+                qa_retriever=_qa,
+                es_retriever=_es,
                 router=_router,
                 case_retriever=case_retriever or UserCaseRetriever(),
                 normalizer=normalizer or QueryNormalizer(),
@@ -107,7 +112,7 @@ class MedicalChatService:
 
         Returns:
             字典，键为：``answer``、``route``、``kg_results``、
-            ``toyhom_results``、``reranked_results``、``risk_info``。
+            ``qa_results``、``qa_source_details``、``risk_info``。
         """
         # 1. 风险检测（在检索之前，以便尽早标记）
         risk_info = self.safety_guard.detect_risk(query)
@@ -115,20 +120,20 @@ class MedicalChatService:
         # 2. 多源检索
         retrieval = self.hybrid_retriever.retrieve(query, username=username)
 
-        # 3. 重排序
-        reranked = self.reranker.rerank(
+        # 3. 对 QA 结果进行 Cross-Encoder 重排序（KG 结果不参与重排）
+        retrieval["qa_results"] = self.reranker.rerank(
             query,
-            retrieval["all_results"],
+            retrieval["qa_results"],
             top_k=settings.rerank_top_k,
         )
 
         # 4. 计算检索质量
         retrieval_quality = {
             "has_kg": bool(retrieval["kg_results"]),
-            "has_qa": bool(retrieval["toyhom_results"]),
+            "has_qa": bool(retrieval["qa_results"]),
             "has_case": bool(retrieval.get("case_results")),
             "confidence": (
-                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"] or retrieval.get("case_results"))
+                "high" if (retrieval["kg_results"] or retrieval["qa_results"] or retrieval.get("case_results"))
                 else "none"
             ),
         }
@@ -140,7 +145,7 @@ class MedicalChatService:
         messages = self.prompt_builder.build_messages(
             query=query,
             kg_results=retrieval["kg_results"],
-            toyhom_results=retrieval["toyhom_results"],
+            qa_results=retrieval["qa_results"],
             case_results=retrieval.get("case_results", []),
             case_context=user_case_summary,
             route=retrieval["route"],
@@ -162,9 +167,9 @@ class MedicalChatService:
             "answer": answer,
             "route": retrieval["route"],
             "kg_results": retrieval["kg_results"],
-            "toyhom_results": retrieval["toyhom_results"],
+            "qa_results": retrieval["qa_results"],
             "case_results": retrieval.get("case_results", []),
-            "reranked_results": reranked,
+            "qa_source_details": retrieval.get("qa_source_details", {}),
             "risk_info": risk_info,
             "query_info": retrieval.get("query_info"),
         }
@@ -188,7 +193,7 @@ class MedicalChatService:
         Args:
             query: 用户问题。
             user_case_summary: 可选的病例摘要。
-            department: 可选科室过滤（非"全科"时传入 ToyhomQARetriever）。
+            department: 可选科室过滤（非"全科"时传入 Milvus 检索）。
             provider: 可选 LLM 提供商（deepseek/zhipuai/ollama），默认使用 settings.llm_provider。
             model: 可选模型名，默认使用对应 provider 的默认模型。
         """
@@ -212,24 +217,24 @@ class MedicalChatService:
         }
         retrieval = self.hybrid_retriever.retrieve(query, department=department, username=username)
 
-        # 3. 重排序
+        # 3. 对 QA 结果进行 Cross-Encoder 重排序（KG 结果不参与重排）
         yield {
             "type": "rag_step",
-            "step": {"key": "rerank", "label": "结果重排序", "icon": "📊", "detail": f"共 {len(retrieval['all_results'])} 条候选"},
+            "step": {"key": "rerank", "label": "QA结果重排序", "icon": "📊", "detail": f"共 {len(retrieval['qa_results'])} 条候选"},
         }
-        reranked = self.reranker.rerank(
+        retrieval["qa_results"] = self.reranker.rerank(
             query,
-            retrieval["all_results"],
+            retrieval["qa_results"],
             top_k=settings.rerank_top_k,
         )
 
         # 4. 计算检索质量
         retrieval_quality = {
             "has_kg": bool(retrieval["kg_results"]),
-            "has_qa": bool(retrieval["toyhom_results"]),
+            "has_qa": bool(retrieval["qa_results"]),
             "has_case": bool(retrieval.get("case_results")),
             "confidence": (
-                "high" if (retrieval["kg_results"] or retrieval["toyhom_results"] or retrieval.get("case_results"))
+                "high" if (retrieval["kg_results"] or retrieval["qa_results"] or retrieval.get("case_results"))
                 else "none"
             ),
         }
@@ -245,7 +250,7 @@ class MedicalChatService:
         messages = self.prompt_builder.build_messages(
             query=query,
             kg_results=retrieval["kg_results"],
-            toyhom_results=retrieval["toyhom_results"],
+            qa_results=retrieval["qa_results"],
             case_results=retrieval.get("case_results", []),
             case_context=user_case_summary,
             route=retrieval["route"],
@@ -268,7 +273,9 @@ class MedicalChatService:
                     "rrf_score": r.get("rrf_score", 0),
                     "source_rank": r.get("rrf_source_rank", 0),
                 }
-                for i, r in enumerate(retrieval["all_results"][:10])
+                for i, r in enumerate(
+                    (retrieval["kg_results"] + retrieval["qa_results"])[:10]
+                )
             ],
         }
         yield {"type": "trace", "rag_trace": rag_trace}

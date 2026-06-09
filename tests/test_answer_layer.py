@@ -26,7 +26,7 @@ class TestPromptBuilderQueryType:
     def test_disease_fact_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="糖尿病的病因是什么",
-            route={"query_type": "disease_fact", "use_kg": True, "use_toyhom_qa": True},
+            route={"query_type": "disease_fact", "use_kg": True, "use_qa": True},
         )
         assert "事实短答" in prompt
         assert "1-3 个短段落" in prompt
@@ -34,7 +34,7 @@ class TestPromptBuilderQueryType:
     def test_medication_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="阿莫西林的剂量是多少",
-            route={"query_type": "medication", "use_kg": True, "use_toyhom_qa": True},
+            route={"query_type": "medication", "use_kg": True, "use_qa": True},
         )
         assert "用药安全" in prompt
         assert "剂量信息必须带单位" in prompt
@@ -42,7 +42,7 @@ class TestPromptBuilderQueryType:
     def test_symptom_consult_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="头痛发热是什么病",
-            route={"query_type": "symptom_consult", "use_kg": True, "use_toyhom_qa": True},
+            route={"query_type": "symptom_consult", "use_kg": True, "use_qa": True},
         )
         assert "症状鉴别" in prompt
         assert "可能原因排序" in prompt
@@ -50,28 +50,28 @@ class TestPromptBuilderQueryType:
     def test_test_report_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="需要做什么检查",
-            route={"query_type": "test_report", "use_kg": True, "use_toyhom_qa": True},
+            route={"query_type": "test_report", "use_kg": True, "use_qa": True},
         )
         assert "检查/报告解读" in prompt
 
     def test_diet_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="糖尿病不能吃什么",
-            route={"query_type": "diet", "use_kg": True, "use_toyhom_qa": True},
+            route={"query_type": "diet", "use_kg": True, "use_qa": True},
         )
         assert "饮食建议" in prompt
 
     def test_department_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="感冒挂什么科",
-            route={"query_type": "department", "use_kg": True, "use_toyhom_qa": True},
+            route={"query_type": "department", "use_kg": True, "use_qa": True},
         )
         assert "科室咨询" in prompt
 
     def test_general_medical_qa_injects_hint(self, builder):
         prompt = builder.build_answer_prompt(
             query="感冒了怎么办",
-            route={"query_type": "general_medical_qa", "use_kg": False, "use_toyhom_qa": True},
+            route={"query_type": "general_medical_qa", "use_kg": False, "use_qa": True},
         )
         assert "综合医疗问答" in prompt
         assert "自然组织" in prompt
@@ -80,7 +80,7 @@ class TestPromptBuilderQueryType:
         """未知 query_type 回退到 general_medical_qa。"""
         prompt = builder.build_answer_prompt(
             query="test",
-            route={"query_type": "bogus_type", "use_kg": False, "use_toyhom_qa": True},
+            route={"query_type": "bogus_type", "use_kg": False, "use_qa": True},
         )
         assert "综合医疗问答" in prompt
 
@@ -103,7 +103,7 @@ class TestPromptBuilderRetrievalQuality:
             query="感冒了怎么办",
             retrieval_quality={"has_kg": True, "has_qa": False, "confidence": "high"},
         )
-        assert "如 [KG-1]、[QA-2]、[CASE-1]" in prompt
+        assert "请严格根据以上检索资料回答用户的问题" in prompt
 
     def test_none_confidence_injects_note(self, builder):
         """空检索时走 Tier 2 安全回答。"""
@@ -169,19 +169,19 @@ class TestPromptBuilderContextAssembly:
         )
         assert "上呼吸道感染" in prompt
 
-    def test_toyhom_results_answer_included(self, builder):
+    def test_qa_results_answer_included(self, builder):
         qa = [{"title": "感冒了吃啥药", "answer": "建议多喝水、休息。", "department": "全科"}]
         prompt = builder.build_answer_prompt(
-            query="感冒了怎么办", toyhom_results=qa
+            query="感冒了怎么办", qa_results=qa
         )
         assert "多喝水" in prompt
         assert "全科" in prompt
 
-    def test_toyhom_results_title_fallback(self, builder):
+    def test_qa_results_title_fallback(self, builder):
         """当 answer 为空时，使用 title 作为文本。"""
         qa = [{"title": "感冒了吃啥药", "answer": "", "department": "全科"}]
         prompt = builder.build_answer_prompt(
-            query="感冒了怎么办", toyhom_results=qa
+            query="感冒了怎么办", qa_results=qa
         )
         assert "感冒了吃啥药" in prompt
 

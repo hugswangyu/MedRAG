@@ -6,8 +6,8 @@ except Exception:  # pragma: no cover - optional sentence-transformers dependenc
     EmbeddingModel = None  # type: ignore[assignment]
 
 try:
-    from medrag.vectors.toyhom_retriever import ToyhomQARetriever
+    from medrag.vectors.qa_retriever import QARetriever
 except Exception:  # pragma: no cover - optional vector runtime dependency
-    ToyhomQARetriever = None  # type: ignore[assignment]
+    QARetriever = None  # type: ignore[assignment]
 
-__all__ = ["EmbeddingModel", "MilvusClientWrapper", "ToyhomQARetriever"]
+__all__ = ["EmbeddingModel", "MilvusClientWrapper", "QARetriever"]

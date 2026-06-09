@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 _env_root = BASE_DIR
 while _env_root.parent != _env_root and not (_env_root / ".env").exists():
     _env_root = _env_root.parent
-load_dotenv(_env_root / ".env")
+load_dotenv(_env_root / ".env", override=True)
 
 
 def _env_str(name: str, default: str) -> str:
@@ -73,14 +73,19 @@ class Settings:
         "TOYHOM_DATASET_PATH",
         "Chinese-medical-dialogue-data/Data_数据",
     )
+    cmedqa2_hf_path: str = _env_str("CMEDQA2_HF_PATH", "zirui3/cMedQA2-instructions")
     user_upload_case_path: Path = _env_path(
         "USER_UPLOAD_CASE_PATH",
         "user_uploads/cases",
     )
 
+    # Elasticsearch
+    es_hosts: str = _env_str("ES_HOSTS", "http://localhost:9200")
+    es_index_name: str = _env_str("ES_INDEX_NAME", "cmedqa2")
+
     # Retrieval
-    retrieval_top_k: int = _env_int("RETRIEVAL_TOP_K", 10)
-    rerank_top_k: int = _env_int("RERANK_TOP_K", 5)
+    retrieval_top_k: int = _env_int("RETRIEVAL_TOP_K", 15)
+    rerank_top_k: int = _env_int("RERANK_TOP_K", 8)
 
     # LLM / DeepSeek
     llm_type: str = _env_str("LLM_TYPE", "deepseek")
@@ -119,10 +124,10 @@ class Settings:
 
     # Ollama
     ollama_base_url: str = _env_str("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-    ollama_model: str = _env_str("OLLAMA_MODEL", "qwen:32b")
+    ollama_model: str = _env_str("OLLAMA_MODEL", "qwen3.5:9b")
     ollama_model_options: tuple[str, ...] = _env_tuple(
         "OLLAMA_MODEL_OPTIONS",
-        ("qwen:32b",),
+        ("qwen3.5:9b", "qwen:32b", "qwen:7b", "qwen:14b", "qwen2.5:7b"),
     )
 
 

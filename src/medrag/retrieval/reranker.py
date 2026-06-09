@@ -107,9 +107,11 @@ class CrossEncoderReranker:
         scores = self.model.predict(pairs, show_progress_bar=False)
 
         for r, ce_score in zip(results, scores):
+            r["ce_score"] = round(float(ce_score), 4)
+            rrf = r.get("rrf_score") or 0
             r["final_score"] = round(float(ce_score), 4)
             r["rerank_reason"] = (
-                f"source={r.get('source')}, ce={ce_score:.4f}"
+                f"source={r.get('source')}, ce={ce_score:.4f}, rrf={rrf:.6f}"
             )
 
         return sorted(results, key=lambda r: r["final_score"], reverse=True)[:top_k]
